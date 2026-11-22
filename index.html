@@ -47,6 +47,7 @@
   <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></symbol>
   <symbol id="i-sort" viewBox="0 0 24 24"><path d="M5 7h14M7 12h10M10 17h4"/></symbol>
   <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M3.5 11.2 20 4.5l-6.2 16-2.7-6.6-7.6-2.7Z"/><path d="m11.1 13.9 5-5"/></symbol>
   <symbol id="i-play" viewBox="0 0 24 24"><path d="m8 5 11 7-11 7V5Z"/></symbol>
   <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
   <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
@@ -75,13 +76,13 @@
     </button>
 
     <nav class="drawer-nav">
-      <!-- 编程工具、AI 创作两个独立入口暂时收起：这些能力通过跟小智对话来用。想恢复：删掉 paused-entry 这个 class 即可。 -->
+      <!-- AI 创作入口暂时收起（能力仍在对话里用）。编程工具已恢复。 -->
       <button class="nav-item paused-entry" data-goto="create">
         <svg class="icon"><use href="#i-spark"/></svg>
         <span class="nav-label">AI 创作</span>
         <span class="nav-hint">写诗、画图、分镜</span>
       </button>
-      <button class="nav-item paused-entry" data-goto="tools">
+      <button class="nav-item" data-goto="tools">
         <svg class="icon"><use href="#i-code"/></svg>
         <span class="nav-label">编程工具</span>
       </button>
@@ -150,6 +151,7 @@
           <div class="composer-field" id="input" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="给小智说点什么…"></div>
           <button class="icon-btn" id="voiceInput" data-action="voice-input" aria-label="语音输入"><svg class="icon"><use href="#i-mic-wave"/></svg></button>
           <button class="icon-btn" data-action="attach" aria-label="更多"><svg class="icon"><use href="#i-plus"/></svg></button>
+          <button class="send-arrow" id="sendBtn" data-action="send" aria-label="发送" disabled><svg class="icon"><use href="#i-send"/></svg></button>
         </div>
         <p class="ai-note">内容由 AI 生成，重要信息请核对</p>
       </div>

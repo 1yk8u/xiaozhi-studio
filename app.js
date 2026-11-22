@@ -52,6 +52,15 @@ const TOOLS = [
   { id: 'regex', name: '正则生成', desc: '写正则并逐段解释', icon: 'i-code', bg: '#eaf0ff', color: '#3d63b5', template: '写一个匹配 {{要匹配的内容}} 的正则表达式，逐段解释，并给 3 个正例和 3 个反例。' },
   { id: 'ui', name: '界面还原', desc: '把描述变成可预览页面', icon: 'i-image', bg: '#ffeff4', color: '#c54470', template: '写一个单文件 HTML 页面，实现：{{界面需求}}。要求响应式、无外部依赖、代码整洁。' },
   { id: 'svg', name: '矢量插图', desc: '用代码画出一张图', icon: 'i-spark', bg: '#fff4e6', color: '#c47a20', template: '用纯 SVG 画一张插画：{{画面描述}}。要求结构清晰、配色克制，直接返回 <svg> 标签，不要 Markdown 包裹。' },
+  // 语言与平台：Android / Python / 前端 / 后端等
+  { id: 'android-sdk', name: 'Android SDK', desc: '安卓组件与 API 用法', icon: 'i-code', bg: '#eaf6e9', color: '#2e8b3d', template: '用 Android SDK 实现：{{功能需求}}。用 Kotlin 优先，给出关键类、API 调用和必要的权限配置，关键处写中文注释，并指出常见坑。' },
+  { id: 'android-studio', name: 'Android Studio', desc: '建项目、Gradle、调试', icon: 'i-toolbox', bg: '#e8f0ff', color: '#3568c4', template: '在 Android Studio 里帮我完成：{{任务}}。给出具体步骤、Gradle 配置和需要的文件路径，说明原理和验证方法。' },
+  { id: 'android-ui', name: '安卓界面', desc: 'Compose / XML 布局', icon: 'i-palette', bg: '#f3ebff', color: '#7a52cc', template: '用 Android {{Compose 或 XML}} 写一个界面：{{界面需求}}。给出完整布局代码、尺寸与主题处理，并说明适配要点。' },
+  { id: 'python', name: 'Python', desc: '脚本/数据处理/自动化', icon: 'i-code', bg: '#eef2ff', color: '#3f5fc4', template: '用 Python 实现：{{需求}}。给出可直接运行的代码，关键处写中文注释，并说明依赖和运行方式。' },
+  { id: 'python-data', name: 'Python 数据分析', desc: 'pandas / 可视化', icon: 'i-folder', bg: '#e9f7f6', color: '#14988f', template: '用 Python（pandas/matplotlib）分析：{{分析需求}}。给出数据清洗、分析和可视化的完整代码，并解释结论怎么看。' },
+  { id: 'frontend', name: '前端页面', desc: 'HTML / CSS / JS', icon: 'i-image', bg: '#fff0ec', color: '#d9603f', template: '用原生 HTML/CSS/JS 实现：{{页面需求}}。要求响应式、代码整洁、无外部依赖，给出完整单文件代码。' },
+  { id: 'react', name: 'React 组件', desc: '可复用组件与状态', icon: 'i-spark', bg: '#e8f1ff', color: '#2f6fd0', template: '写一个 React 组件实现：{{功能}}。用函数组件和 Hooks，给出完整代码、props 定义和使用示例。' },
+  { id: 'backend', name: '后端接口', desc: 'API / 数据库设计', icon: 'i-shield', bg: '#e9f7ef', color: '#1e9a5a', template: '设计一个后端接口实现：{{功能需求}}。给出路由、请求响应结构、数据库表设计和必要的校验，技术栈用 {{技术栈}}。' },
 ];
 
 /* 声音不再写死：直接用设备上真实安装的语音引擎，有多少列多少 */
@@ -264,6 +273,7 @@ document.addEventListener('click', (e) => {
     'new-chat': newChat,
     'close-side': () => byId('sidePanel').style.display = 'none',
     'read-last': readLast,
+    send: () => sendMessage(),
     camera: () => toast('相机权限需要 HTTPS 环境，本地预览可先直接输入文字'),
     attach: () => toast('直接把要做的告诉小智，写代码、出图都能在对话里完成'),
     'voice-input': toggleVoiceInput,
@@ -323,7 +333,7 @@ function renderWelcomePrompts() {
   });
 }
 
-function setInput(text) { byId('input').innerText = text; byId('input').focus(); }
+function setInput(text) { byId('input').innerText = text; byId('input').focus(); syncSendBtn(); }
 
 function appendMsg(role, text = '', opts = {}) {
   const wrap = document.createElement('div');
@@ -360,6 +370,7 @@ async function sendMessage(override) {
   const text = (override || input.innerText).trim();
   if (!text) return;
   input.innerText = '';
+  syncSendBtn();
   state.lastRequestAt = Date.now();
 
   if (!state.currentChat) {
@@ -453,6 +464,7 @@ async function sendMessage(override) {
   } finally {
     state.busy = false;
     state.controller = null;
+    syncSendBtn();
     scrollToBottom();
   }
 }
@@ -485,6 +497,13 @@ byId('messages').addEventListener('click', (e) => {
   if (key === 'share') copyText(text).then(() => toast('内容已复制，可以粘贴分享'));
 });
 
+const sendBtn = byId('sendBtn');
+function syncSendBtn() {
+  if (!sendBtn) return;
+  const has = !!(byId('input').innerText || '').trim();
+  sendBtn.disabled = !has || state.busy;
+}
+byId('input').addEventListener('input', syncSendBtn);
 byId('input').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
     e.preventDefault();
@@ -674,14 +693,87 @@ function toggleCamera() {
   byId('voiceTranscript').innerHTML = on ? '<span class="q">视频画面占位</span>画面已接入，声音照常走小智。' : '';
 }
 
+function setVoiceStatus(html) { const el = byId('voiceStatus'); if (el) el.innerHTML = html; }
+function setVoiceTranscript(who, text) {
+  const el = byId('voiceTranscript');
+  if (!el) return;
+  if (!el.dataset.active) el.innerHTML = '';
+  el.dataset.active = '1';
+  const line = document.createElement('div');
+  line.className = who === 'me' ? 'q' : 'a';
+  line.textContent = (who === 'me' ? '你：' : '小智：') + text;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+// 语音通话：把识别出的话发给 AI，回复打到通话页并出声朗读
+async function callAIFromVoice(text) {
+  if (!state.cloudReady || !state.model) {
+    setVoiceStatus('云端还没连上。刷新页面重试；GitHub 静态版请用云端版链接才能对话。');
+    toast('当前是静态版，真 AI 对话请用云端版');
+    return;
+  }
+  state.callContext = state.callContext || [];
+  state.callContext.push({ role: 'user', content: text });
+  setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 小智正在回应…');
+  stopSpeech();
+  let full = '';
+  try {
+    const stream = await cloud.llm.chat.completions.create({
+      model: state.model.id,
+      messages: [
+        { role: 'system', content: (typeof SYSTEM_PROMPT !== 'undefined' ? SYSTEM_PROMPT : '') + '\n\n这是语音通话，用口语化的短句回答，一两句话即可，不要列表和代码，方便朗读。' },
+        ...state.callContext.slice(-10),
+      ],
+      stream: true, temperature: 0.7,
+    });
+    let shown = false;
+    for await (const chunk of stream) {
+      const d = chunk.choices?.[0]?.delta;
+      if (d?.content) {
+        full += d.content;
+        if (!shown) { setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 小智正在说…'); shown = true; }
+        feedSpeechWhileTyping(full); // 边出字边念
+      }
+    }
+    const clean = cleanForSpeech(full);
+    const tail = clean.slice(speechQ.spokenTo).trim();
+    if (tail) speechQ.queue.push(tail);
+    flushSpeechQueue();
+    setVoiceTranscript('ai', full);
+    state.callContext.push({ role: 'assistant', content: full });
+    setVoiceStatus('说完了，接着说吧');
+  } catch (e) {
+    setVoiceStatus('出问题了：' + (friendlyError?.(e) || '请重试'));
+  }
+}
+
 function toggleMic() {
   const btn = byId('micBtn');
-  const off = btn.classList.toggle('off');
-  btn.querySelector('use').setAttribute('href', off ? '#i-video-off' : '#i-mic');
-  byId('voiceStatus').innerHTML = off
-    ? '麦克风已关闭'
-    : '<span class="eq"><i></i><i></i><i></i><i></i></span> 点击麦克风开始说话';
-  toast(off ? '麦克风已关闭' : '麦克风已打开');
+  if (state.recognition) { state.recognition.stop(); state.recognition = null; return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('这个浏览器不支持语音识别，用键盘输入吧'); return; }
+  const rec = new SR();
+  rec.lang = 'zh-CN';
+  rec.interimResults = true;
+  rec.continuous = false;
+  let said = '';
+  rec.onresult = (e) => {
+    let text = '';
+    for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+    said = text;
+    setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> ' + (text || '在听…'));
+  };
+  rec.onerror = () => { toast('没听清，再说一次'); setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 点击麦克风开始说话'); state.recognition = null; };
+  rec.onend = () => {
+    state.recognition = null;
+    if (said && said.trim()) { setVoiceTranscript('me', said.trim()); callAIFromVoice(said.trim()); }
+    else setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 点击麦克风开始说话');
+  };
+  rec.start();
+  state.recognition = rec;
+  setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 在听，说吧…');
+  toast('在听，说完自动回你');
 }
 
 /* ---------- 技能 / 工具 ---------- */
