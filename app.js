@@ -86,9 +86,52 @@ function voiceGroup(lang) {
   if (l.startsWith('ko')) return '韩语';
   return '其他语言';
 }
+// 女声优先：浏览器名字里带这些多半是男声，先滤掉。
+// 只是一层启发式过滤；判断不准的声音宁可留下，也不误删能用的。
+const MALE_VOICE_RE = /\b(male|david|daniel|george|mark|alex|andrew|ryan|thomas|william|james|richard|fred|tom|jack|guy|bill|yunyang|yunxi|hanyu|sinji|kangkang|paul|steve)\b/i;
+function isMaleVoice(v) {
+  return MALE_VOICE_RE.test(String(v?.name || '') + ' ' + String(v?.voiceURI || ''));
+}
+
+// 声音太多不好挑：从设备真实声音里精选最多 12 个（只留女声，中文 / 自然音色优先），
+// 并保证当前正在用的那个一定在里面。删掉的声音已在 getSystemVoices 里过滤。
+const VOICE_LIMIT = 12;
+function pickVoices(all, limit = VOICE_LIMIT) {
+  if (!all) return [];
+  // 先去掉男声；如果滤完一个不剩（判断全错），退回原列表，避免没声音可用
+  const female = all.filter((v) => !isMaleVoice(v));
+  const pool = female.length ? female : all;
+  if (pool.length <= limit) return pool;
+  const sel = String(store.voice || '');
+  const score = (v) => {
+    const g = voiceGroup(v.lang);
+    let s = 0;
+    if (g === '中文') s += 100;
+    else if (g === '粤语') s += 80;
+    else if (g === '日语') s += 50;
+    else if (g === '韩语') s += 45;
+    else if (g === '英文') s += 30;
+    else s += 10;
+    const raw = String(v.name || '');
+    if (/natural|neural/i.test(raw)) s += 20;
+    if (v.localService) s += 10;
+    if (v.default) s += 5;
+    return s;
+  };
+  const sorted = pool.slice().sort((a, b) => score(b) - score(a));
+  const picked = sorted.slice(0, limit);
+  const chosen = pool.find((v) => v.voiceURI === sel || v.name === sel);
+  if (chosen && !picked.some((v) => v.voiceURI === chosen.voiceURI && v.name === chosen.name)) {
+    picked[picked.length - 1] = chosen;
+  }
+  return picked;
+}
 function getSelectedVoice() {
-  const list = getSystemVoices();
-  if (!list.length) return null;
+  const all = getSystemVoices();
+  if (!all.length) return null;
+  // 只在女声里选：设置里选中的优先，否则挑中文女声
+  const female = all.filter((v) => !isMaleVoice(v));
+  const list = female.length ? female : all;
   const exact = list.find((v) => v.voiceURI === store.voice || v.name === store.voice);
   if (exact) return exact;
   // 默认挑一个中文声音（优先本地），不再落到英文上
@@ -113,7 +156,7 @@ const THEMES = [
 /* ---------- 状态 ---------- */
 const STORE_KEY = 'xiaozhi-studio-v1';
 const defaults = {
-  voice: '', speechRate: 1, speechPitch: 1, autoRead: true, theme: '默认', memoryOn: true,
+  voice: '', speechRate: 1, speechPitch: 1, autoRead: true, autoTool: true, theme: '默认', memoryOn: true,
   hiddenVoices: [], asrLang: '',
   history: [], tasks: [], memories: [], assets: [], favs: ['旅游计划', '对比解读', 'PPT 制作'],
 };
@@ -291,6 +334,19 @@ function friendlyError(err) {
 }
 
 /* ---------- Markdown / 代码渲染 ---------- */
+// 图片工具：从回答里提取 SVG 代码块，安全清理后内联渲染出来
+function renderInlineSvg(container, text) {
+  const m = String(text).match(/<svg[\s\S]*?<\/svg>/i);
+  if (!m || !container) return;
+  const safe = m[0]
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '')
+    .replace(/javascript:/gi, '');
+  const box = document.createElement('div');
+  box.className = 'inline-art';
+  box.innerHTML = safe;
+  container.insertBefore(box, container.firstChild);
+}
 const KEYWORDS = /\b(?:const|let|var|function|return|if|else|for|while|class|new|import|export|from|def|async|await|public|private|int|str|bool|None|True|False|try|catch|throw|switch|case|break|continue|interface|type|enum)\b/;
 function highlight(code) {
   const re = /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*)("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b\d+(?:\.\d+)?\b)|(\b(?:const|let|var|function|return|if|else|for|while|class|new|import|export|from|def|async|await|public|private|int|str|bool|None|True|False|try|catch|throw|switch|case|break|continue|interface|type|enum)\b)/g;
@@ -363,6 +419,12 @@ document.addEventListener('click', (e) => {
     privacy: () => toast('对话只存在这台设备上，不上传第三方'),
     about: () => toast('小智工作台 v1.0 · 用代码说话'),
     'toggle-memory': toggleMemory,
+    'toggle-auto-tool': (el) => {
+      store.autoTool = store.autoTool === false;
+      el.classList.toggle('on', store.autoTool !== false);
+      persist();
+      toast(store.autoTool === false ? '已关闭自动调用工具' : '已开启：说到写代码/画图就自动调用');
+    },
     'add-task': addTask,
     'add-group': () => toast('分组功能先留空，需要再加'),
     'sort-history': () => toast('已按最近使用排序'),
@@ -410,7 +472,26 @@ function renderWelcomePrompts() {
   });
 }
 
-function setInput(text) { byId('input').innerText = text; byId('input').focus(); syncSendBtn(); }
+// contenteditable 直接改 innerText 会让光标卡在旧位置（那根"不走"的竖线）。
+// 赋值后显式把光标放到文字末尾，打字和语音输入就跟上了。
+function placeCaretAtEnd(el) {
+  try {
+    const sel = window.getSelection();
+    if (!sel || !el) return;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) {}
+}
+function setInput(text) {
+  const el = byId('input');
+  el.textContent = text;
+  el.focus();
+  placeCaretAtEnd(el);
+  syncSendBtn();
+}
 
 function appendMsg(role, text = '', opts = {}) {
   const wrap = document.createElement('div');
@@ -440,13 +521,40 @@ function appendMsg(role, text = '', opts = {}) {
 
 function scrollToBottom() { const m = byId('messages'); m.scrollTop = m.scrollHeight; }
 
+/* ---------- AI 自动调用工具 ----------
+   不用手动点工具卡：对话里一说到写代码 / 画图 / 分镜，
+   就自动切到对应工具的专用指令，让模型直接产出完整结果。
+   不依赖模型原生 function calling，免费模型也能用。 */
+const TOOL_RUNNERS = {
+  code: {
+    cn: '写代码',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：写代码工具】用户要代码时，直接给出完整可运行的代码，放在一个代码块里（```语言名 开头）。关键处写中文注释，代码后用一小段话说清思路、依赖和怎么运行。不要只给思路或伪代码。',
+  },
+  image: {
+    cn: '生成图片',
+    system: '你是一个矢量插画生成器。用户要图时，用纯 SVG 画出来：直接输出一个 ```svg 代码块，里面是完整的 <svg>...</svg> 标签，不要 Markdown 图片语法，不要解释文字。配色克制、结构清晰、能直接看懂。代码块后用一句话说明画了什么。',
+  },
+  storyboard: {
+    cn: '生成分镜',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：视频分镜工具】用户要视频脚本 / 分镜时，按时间轴列 5-7 个镜头，每个含时长、画面、运镜、旁白，最后给一句整体风格说明。用中文，直接给成品。',
+  },
+};
+function detectToolIntent(text) {
+  const t = String(text || '');
+  if (/分镜|镜头脚本|拍摄脚本|视频脚本|短视频|视频分镜/.test(t)) return 'storyboard';
+  if (/(画|生成|来|做|整|搞|设计|绘制|弄)[一一张幅个些]?[^。？!！]{0,8}(图|插画|图片|海报|图标|头像|背景)|svg|矢量图|插画|画一张|画一幅/.test(t)) return 'image';
+  if (/(写|生成|实现|开发|做个|做一个|来个|写个|编|修复|改|重构|封装|写一个|帮我写)[^。？!！]{0,12}(代码|程序|脚本|函数|方法|类|网页|页面|网站|app|应用|接口|api|工具|插件|组件|爬虫|小工具)|\b(python|java|javascript|js|html|css|react|vue|android|kotlin|sql|shell|bash|c\+\+|golang|\bgo\b|rust|php|swift)\b/i.test(t) || /有.?bug|报错|这段.?代码|这段代码|重构|修复/.test(t)) return 'code';
+  return null;
+}
+
 async function sendMessage(override) {
   if (state.busy) { toast('等这条回完再说'); return; }
   if (Date.now() - state.lastRequestAt < 1200) { toast('慢一点，防止额度被一次用完'); return; }
   const input = byId('input');
-  const text = (override || input.innerText).trim();
+  const text = (override || input.textContent).trim();
   if (!text) return;
-  input.innerText = '';
+  input.textContent = '';
+  placeCaretAtEnd(input);
   syncSendBtn();
   state.lastRequestAt = Date.now();
 
@@ -469,15 +577,27 @@ async function sendMessage(override) {
     return;
   }
 
+  // 自动调用工具：命中意图就用对应工具的专用指令，并在回复上标出来
+  const toolId = store.autoTool === false ? null : detectToolIntent(text);
+  const tool = toolId ? TOOL_RUNNERS[toolId] : null;
+  if (tool) {
+    const badge = document.createElement('div');
+    badge.className = 'auto-tool-badge';
+    badge.innerHTML = `<svg class="icon"><use href="#i-toolbox"/></svg> 已自动调用「${tool.cn}」工具`;
+    reply.wrap.querySelector('.msg-body').insertBefore(badge, reply.content);
+  }
+
   state.busy = true;
   state.controller = new AbortController();
   let full = '';
   stopSpeech(); // 新一轮对话，清掉上一次的朗读队列
   const ctx = state.currentChat.context.slice(-12);
+  const baseSystem = tool ? tool.system : SYSTEM_PROMPT;
+  const withMemory = store.memoryOn && store.memories.length
+    ? `${baseSystem}\n\n你记住的关于用户的偏好：${store.memories.map((m) => m.text).join('；')}`
+    : baseSystem;
   const messages = [
-    { role: 'system', content: store.memoryOn && store.memories.length
-      ? `${SYSTEM_PROMPT}\n\n你记住的关于用户的偏好：${store.memories.map((m) => m.text).join('；')}`
-      : SYSTEM_PROMPT },
+    { role: 'system', content: withMemory },
     ...ctx,
     { role: 'user', content: text },
   ];
@@ -494,6 +614,8 @@ async function sendMessage(override) {
       reply.content.innerHTML = '<span style="color:var(--ink-3)">这次没有返回内容，点重新生成试试。</span>';
     } else {
       reply.content.innerHTML = renderText(full);
+      // 图片工具：把返回的 SVG 直接渲染出来，不用让用户对着代码看
+      if (toolId === 'image') renderInlineSvg(reply.content, full);
       // 生成结束：把末尾不足一句的剩余文字补念
       if (store.autoRead && window.speechSynthesis) {
         const clean = cleanForSpeech(full);
@@ -563,7 +685,7 @@ byId('messages').addEventListener('click', (e) => {
 const sendBtn = byId('sendBtn');
 function syncSendBtn() {
   if (!sendBtn) return;
-  const has = !!(byId('input').innerText || '').trim();
+  const has = !!(byId('input').textContent || '').trim();
   sendBtn.disabled = !has || state.busy;
 }
 byId('input').addEventListener('input', syncSendBtn);
@@ -706,12 +828,12 @@ function langLabel(lang) {
 function renderVoices() {
   const box = byId('voiceList');
   if (!box) return;
-  const list = getSystemVoices();
+  const list = pickVoices(getSystemVoices());
   box.innerHTML = '';
 
   const head = document.createElement('div');
   head.className = 'voice-head';
-  head.innerHTML = `<p>下面这些是你这台设备上<b>真实安装</b>的朗读声音，共 <b id="voiceCount">${list.length}</b> 个。点一个就能试听，选中后小智就用它念。</p>
+  head.innerHTML = `<p>从这台设备真实安装的声音里挑了 <b id="voiceCount">${list.length}</b> 个（中文、自然音色优先）。点一个就能试听，选中后小智就用它念。</p>
     <div class="voice-switches">
       <label class="voice-switch"><input type="checkbox" id="autoReadToggle" ${store.autoRead ? 'checked' : ''}><span>边写边读（文字一边出、声音一边念）</span></label>
       <label class="voice-rate">语速 <input type="range" id="speechRate" min="0.6" max="1.6" step="0.1" value="${store.speechRate ?? 1}"><span id="rateVal">${store.speechRate ?? 1}×</span></label>
@@ -1220,12 +1342,19 @@ byId('taskTabs').addEventListener('click', (e) => {
 /* ---------- 侧栏 / 历史 ---------- */
 function renderHistory() {
   const box = byId('historyList');
+  if (!box) return;
   box.innerHTML = '';
-  store.history.slice(0, 12).forEach((h) => {
-    const b = document.createElement('button');
-    b.className = 'history-item' + (state.currentChat?.id === h.id ? ' active' : '');
-    b.textContent = h.title || '新对话';
-    b.onclick = () => {
+  // 全部历史都渲染，列表区可上下滑动；不再只截 12 条
+  store.history.forEach((h) => {
+    const row = document.createElement('div');
+    row.className = 'history-item' + (state.currentChat?.id === h.id ? ' active' : '');
+    row.dataset.histId = h.id;
+
+    const title = document.createElement('button');
+    title.type = 'button';
+    title.className = 'history-title';
+    title.textContent = h.title || '新对话';
+    title.onclick = () => {
       state.currentChat = store.history.find((x) => x.id === h.id) || h;
       const messages = byId('messages');
       messages.innerHTML = '';
@@ -1234,7 +1363,37 @@ function renderHistory() {
       if (!state.currentChat.context.length) renderWelcomePrompts();
       renderHistory(); goto('chat');
     };
-    box.appendChild(b);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'history-del';
+    del.dataset.delHist = h.id;
+    del.title = '删除这段对话';
+    del.setAttribute('aria-label', '删除对话：' + (h.title || '新对话'));
+    del.textContent = '×';
+
+    row.appendChild(title);
+    row.appendChild(del);
+    box.appendChild(row);
+  });
+}
+
+// 删除单条历史（事件委托，挂在列表容器上）
+function bindHistoryDelete() {
+  const box = byId('historyList');
+  if (!box) return;
+  box.addEventListener('click', (e) => {
+    const del = e.target.closest('[data-del-hist]');
+    if (!del) return;
+    e.stopPropagation();
+    const id = del.dataset.delHist;
+    const idx = store.history.findIndex((x) => x.id === id);
+    if (idx < 0) return;
+    store.history.splice(idx, 1);
+    if (state.currentChat?.id === id) state.currentChat = null;
+    persist();
+    renderHistory();
+    toast('已删除这段对话');
   });
 }
 
@@ -1471,6 +1630,7 @@ function boot() {
   document.documentElement.style.setProperty('--brand', THEMES.find((t) => t.name === store.theme)?.color || THEMES[0].color);
   document.documentElement.style.setProperty('--brand-soft', THEMES.find((t) => t.name === store.theme)?.soft || THEMES[0].soft);
   byId('themeValue').textContent = store.theme;
+  byId('autoToolSwitch')?.classList.toggle('on', store.autoTool !== false);
   renderWelcomePrompts();
   renderSkills();
   renderTools();
@@ -1478,6 +1638,7 @@ function boot() {
   renderMemory();
   renderTasks();
   renderHistory();
+  bindHistoryDelete();
   renderCreateTabs();
   initQianfanUI();
   initSyncUI();

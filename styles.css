@@ -82,13 +82,21 @@ h1, h2, h3, h4, p { margin: 0; }
 .mini-btn { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 8px; color: var(--ink-3); }
 .mini-btn:hover { background: rgba(0,0,0,.05); }
 .mini-btn .icon { width: 16px; height: 16px; }
-.history-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.history-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
 .history-item {
-  display: block; width: 100%; text-align: left; padding: 9px 12px; border-radius: 10px;
-  font-size: 13.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex; align-items: center; gap: 4px; flex: none; width: 100%; min-height: 38px;
+  text-align: left; padding: 2px 4px 2px 12px; border-radius: 10px;
+  font-size: 13.5px; color: var(--ink-2);
 }
 .history-item:hover { background: rgba(0,0,0,.035); }
 .history-item.active { background: rgba(7,184,87,.09); color: #078f47; }
+.history-title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.45; }
+.history-del {
+  flex: none; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 7px;
+  color: #9a9aa2; font-size: 17px; line-height: 1; opacity: .55; transition: opacity .15s, background .15s, color .15s;
+}
+.history-item:hover .history-del, .history-del:focus-visible { opacity: 1; }
+.history-del:hover { background: rgba(200,60,60,.1); color: #c33; opacity: 1; }
 .drawer-foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); margin-top: 8px; }
 .user-chip { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; padding: 4px; border-radius: 12px; }
 .avatar { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: #d8e9dc; color: #177a41; font-size: 14px; font-weight: 600; flex: none; }
@@ -514,3 +522,17 @@ h1, h2, h3, h4, p { margin: 0; }
 .voice-del:hover, .voice-del:active { background: #fdeaea; color: #d34b4b; }
 .voice-restore { display: block; width: calc(100% - 32px); margin: 12px 16px 16px; padding: 10px; border: 1px dashed #cfd3d8; border-radius: 10px; background: #fafafb; color: #6b6b73; font-size: 12.5px; cursor: pointer; }
 .voice-restore:hover { background: #f4f4f6; color: var(--ink-2); }
+
+/* ---------- AI 自动调用工具：徽章 / 图片预览 / 设置开关 ---------- */
+.auto-tool-badge { display: inline-flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 5px 11px; background: var(--brand-soft, #e8f8ee); color: var(--brand, #07b857); border-radius: 999px; font-size: 12px; font-weight: 600; }
+.auto-tool-badge .icon { width: 14px; height: 14px; }
+.inline-art { margin: 4px 0 12px; padding: 12px; background: #fff; border: 1px solid var(--line, #ececf0); border-radius: 14px; display: flex; justify-content: center; }
+.inline-art svg { width: 100%; max-width: 420px; height: auto; }
+.tool-auto-row { cursor: default; flex-wrap: wrap; gap: 10px 13px; }
+.tool-auto-row .tool-auto-text { flex: 1; min-width: 0; }
+.tool-auto-row .tool-auto-text span { display: block; font-size: 14.5px; }
+.tool-auto-row .tool-auto-text small { display: block; margin-top: 3px; font-size: 11.5px; color: var(--ink-3); line-height: 1.5; }
+.tool-auto-row > .icon:first-child { width: 20px; height: 20px; color: #55555c; }
+
+/* ---------- 顶栏品牌标记：终端提示符，工程师手写感 ---------- */
+.brand-mark { display: inline-block; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 15px; font-weight: 700; letter-spacing: -1px; color: var(--brand, #07b857); margin-right: 3px; vertical-align: 1px; }
