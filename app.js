@@ -54,18 +54,27 @@ const TOOLS = [
   { id: 'svg', name: '矢量插图', desc: '用代码画出一张图', icon: 'i-spark', bg: '#fff4e6', color: '#c47a20', template: '用纯 SVG 画一张插画：{{画面描述}}。要求结构清晰、配色克制，直接返回 <svg> 标签，不要 Markdown 包裹。' },
 ];
 
-const VOICES = [
-  { name: '静静', note: '自然 · 女声', lang: 'zh-CN', pitch: 1.05, rate: 1 },
-  { name: '小兰-经典版', note: '清晰 · 女声', lang: 'zh-CN', pitch: 1.15, rate: .96 },
-  { name: '学长', note: '低沉 · 男声', lang: 'zh-CN', pitch: .72, rate: .98 },
-  { name: '小威', note: '稳重 · 男声', lang: 'zh-CN', pitch: .82, rate: 1.02 },
-  { name: 'Lily', note: 'English · Female', lang: 'en-US', pitch: 1.12, rate: 1 },
-  { name: 'James', note: 'English · Male', lang: 'en-US', pitch: .78, rate: .98 },
-  { name: 'Bob', note: 'English · Deep', lang: 'en-GB', pitch: .68, rate: .95 },
-  { name: '粤语女声', note: '粤语', lang: 'zh-HK', pitch: 1.05, rate: .98 },
-  { name: '四川小敏', note: '四川话', lang: 'zh-CN', pitch: 1.1, rate: 1.05 },
-  { name: '东北雪梅', note: '东北话', lang: 'zh-CN', pitch: .95, rate: 1.08 },
-];
+/* 声音不再写死：直接用设备上真实安装的语音引擎，有多少列多少 */
+function getSystemVoices() {
+  try { return window.speechSynthesis?.getVoices() || []; } catch (e) { return []; }
+}
+function voiceGroup(lang) {
+  const l = (lang || '').toLowerCase();
+  if (l.startsWith('yue') || (l.startsWith('zh') && l.includes('hk'))) return '粤语';
+  if (l.startsWith('zh')) return '中文';
+  if (l.startsWith('en')) return 'English';
+  if (l.startsWith('ja')) return '日本語';
+  if (l.startsWith('ko')) return '한국어';
+  return '其他语言';
+}
+function getSelectedVoice() {
+  const list = getSystemVoices();
+  if (!list.length) return null;
+  const exact = list.find((v) => v.voiceURI === store.voice);
+  if (exact) return exact;
+  const zh = list.find((v) => (v.lang || '').toLowerCase().startsWith('zh'));
+  return zh || list.find((v) => v.default) || list[0];
+}
 
 const PROMPTS = [
   '帮我写一个小工具，把文件夹里的图片按日期重命名',
@@ -84,7 +93,7 @@ const THEMES = [
 /* ---------- 状态 ---------- */
 const STORE_KEY = 'xiaozhi-studio-v1';
 const defaults = {
-  voice: '静静', theme: '默认', memoryOn: true,
+  voice: '', speechRate: 1, speechPitch: 1, autoRead: true, theme: '默认', memoryOn: true,
   history: [], tasks: [], memories: [], assets: [], favs: ['旅游计划', '对比解读', 'PPT 制作'],
 };
 let store = { ...defaults };
@@ -375,6 +384,7 @@ async function sendMessage(override) {
   state.busy = true;
   state.controller = new AbortController();
   let full = '';
+  stopSpeech(); // 新一轮对话，清掉上一次的朗读队列
   const ctx = state.currentChat.context.slice(-12);
   const messages = [
     { role: 'system', content: store.memoryOn && store.memories.length
@@ -399,6 +409,7 @@ async function sendMessage(override) {
         full += delta.content;
         reply.content.innerHTML = renderText(full);
         scrollToBottom();
+        feedSpeechWhileTyping(full); // 文字蹦的同时，把完整句送去朗读
       }
       if (delta?.refusal) {
         full += `\n\n${delta.refusal}`;
@@ -409,6 +420,13 @@ async function sendMessage(override) {
       reply.content.innerHTML = '<span style="color:var(--ink-3)">这次没有返回内容，点重新生成试试。</span>';
     } else {
       reply.content.innerHTML = renderText(full);
+      // 生成结束：把末尾不足一句的剩余文字补念
+      if (store.autoRead && window.speechSynthesis) {
+        const clean = cleanForSpeech(full);
+        const tail = clean.slice(speechQ.spokenTo).trim();
+        if (tail) speechQ.queue.push(tail);
+        flushSpeechQueue();
+      }
       restoreActions(reply, full);
       state.currentChat.context.push({ role: 'user', content: text }, { role: 'assistant', content: full });
       state.currentChat.context = state.currentChat.context.slice(-20);
@@ -420,6 +438,7 @@ async function sendMessage(override) {
   } catch (err) {
     if (err?.name === 'AbortError') {
       reply.content.innerHTML = renderText(full) + '<br><span style="color:var(--ink-3)">已停止生成。</span>';
+      stopSpeech();
       if (full) restoreActions(reply, full);
     } else {
       const msg = friendlyError(err);
@@ -483,30 +502,69 @@ async function copyText(text) {
 }
 
 /* ---------- 朗读 / 多声音 ---------- */
-function pickVoice(name) { return VOICES.find((v) => v.name === name) || VOICES[0]; }
+/* 朗读队列：文字一边蹦，声音一边按完整句接上去念，不打断、不从头重念 */
+const speechQ = { queue: [], speaking: false, genText: '', spokenTo: 0 };
 
-function findBrowserVoice(pref) {
-  const voices = window.speechSynthesis?.getVoices() || [];
-  if (!voices.length) return null;
-  const exact = voices.find((v) => v.lang?.toLowerCase() === pref.lang.toLowerCase());
-  if (exact) return exact;
-  const langPrefix = pref.lang.split('-')[0].toLowerCase();
-  return voices.find((v) => v.lang?.toLowerCase().startsWith(langPrefix)) || voices[0];
+function cleanForSpeech(text) {
+  return String(text || '')
+    .replace(/```[\s\S]*?```/g, '（代码略）')
+    .replace(/[#*`>]/g, '')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .trim();
+}
+// 把一个完整句切成可朗读的片段（按中文/英文句末标点）
+function splitSentences(text) {
+  return text.split(/(?<=[。！？!?；;\n])/).map((s) => s.trim()).filter(Boolean);
+}
+function flushSpeechQueue() {
+  // 把已排队的句子逐句交给浏览器，onend 里自动接下一句
+  if (speechQ.speaking || !speechQ.queue.length || !window.speechSynthesis) return;
+  speechQ.speaking = true;
+  const text = speechQ.queue.shift();
+  const utter = new SpeechSynthesisUtterance(text.slice(0, 200));
+  const v = getSelectedVoice();
+  if (v) { utter.voice = v; utter.lang = v.lang; }
+  utter.rate = store.speechRate ?? 1;
+  utter.pitch = store.speechPitch ?? 1;
+  utter.onstart = () => setOrbListening(true);
+  utter.onend = () => { setOrbListening(false); speechQ.speaking = false; flushSpeechQueue(); };
+  utter.onerror = () => { speechQ.speaking = false; flushSpeechQueue(); };
+  window.speechSynthesis.speak(utter);
+}
+function enqueueSpeech(text) {
+  splitSentences(cleanForSpeech(text)).forEach((s) => speechQ.queue.push(s));
+  flushSpeechQueue();
+}
+function stopSpeech() {
+  speechQ.queue = [];
+  speechQ.speaking = false;
+  speechQ.genText = '';
+  speechQ.spokenTo = 0;
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+  setOrbListening(false);
+}
+
+// 流式生成时调用：只把「新长出来的完整句」追加进队列
+function feedSpeechWhileTyping(fullText) {
+  if (!store.autoRead || !window.speechSynthesis) return;
+  const clean = cleanForSpeech(fullText);
+  const cut = Math.max(speechQ.spokenTo, clean.length - 240); // 只处理尾部一段,留完整句
+  let safe = cut;
+  // 回退到最近的句末标点，避免读半句
+  for (let i = clean.length - 1; i >= cut; i--) {
+    if ('。！？!?；;\n'.includes(clean[i])) { safe = i + 1; break; }
+  }
+  if (safe <= speechQ.spokenTo) return;
+  const piece = clean.slice(speechQ.spokenTo, safe);
+  speechQ.spokenTo = safe;
+  splitSentences(piece).forEach((s) => speechQ.queue.push(s));
+  flushSpeechQueue();
 }
 
 function speak(text) {
   if (!window.speechSynthesis) { toast('这个浏览器不支持朗读'); return; }
-  window.speechSynthesis.cancel();
-  const pref = pickVoice(store.voice);
-  const utter = new SpeechSynthesisUtterance(text.replace(/```[\s\S]*?```/g, '（代码略）').slice(0, 900));
-  const found = findBrowserVoice(pref);
-  if (found) utter.voice = found;
-  utter.lang = pref.lang;
-  utter.pitch = pref.pitch;
-  utter.rate = pref.rate;
-  utter.onend = () => setOrbListening(false);
-  utter.onstart = () => setOrbListening(true);
-  window.speechSynthesis.speak(utter);
+  stopSpeech();
+  enqueueSpeech(text);
 }
 
 function readLast() {
@@ -516,23 +574,71 @@ function readLast() {
   speak(last.innerText);
 }
 
+function voiceLabel(v) {
+  // 系统给的名字常带一堆括号与连字符，这里只做轻微清理，保留真实身份
+  return (v.name || v.voiceURI || '未命名').replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
 function renderVoices() {
   const box = byId('voiceList');
+  if (!box) return;
+  const list = getSystemVoices();
   box.innerHTML = '';
-  VOICES.forEach((v) => {
-    const row = document.createElement('button');
-    row.className = 'voice-row' + (store.voice === v.name ? ' selected' : '');
-    row.innerHTML = `<span class="voice-dot"><svg class="icon"><use href="#i-volume"/></svg></span>
-      <span class="voice-name">${esc(v.name)}</span><span class="voice-tag">${esc(v.note)}</span>
-      <svg class="icon check"><use href="#i-check"/></svg>`;
-    row.onclick = () => {
-      store.voice = v.name; persist(); renderVoices();
-      byId('voiceValue').textContent = v.name;
-      speak(`你好，我是${v.name}。这是小智的朗读声音。`);
-    };
-    box.appendChild(row);
-  });
-  byId('voiceValue').textContent = store.voice;
+
+  const head = document.createElement('div');
+  head.className = 'voice-head';
+  head.innerHTML = `<p>下面这些是你这台设备上<b>真实安装</b>的朗读声音，共 <b id="voiceCount">${list.length}</b> 个。点一个就能试听，选中后小智就用它念。</p>
+    <div class="voice-switches">
+      <label class="voice-switch"><input type="checkbox" id="autoReadToggle" ${store.autoRead ? 'checked' : ''}><span>边写边读（文字一边出、声音一边念）</span></label>
+      <label class="voice-rate">语速 <input type="range" id="speechRate" min="0.6" max="1.6" step="0.1" value="${store.speechRate ?? 1}"><span id="rateVal">${store.speechRate ?? 1}×</span></label>
+      <button class="voice-refresh" id="voiceRefresh" title="重新读取设备声音"><svg class="icon"><use href="#i-redo"/></svg> 重新读取</button>
+    </div>`;
+  box.appendChild(head);
+
+  if (!list.length) {
+    const tip = document.createElement('div');
+    tip.className = 'voice-empty';
+    tip.textContent = '声音列表还没加载好。手机上请点一下下面的「重新读取」，或稍等片刻再进这个页面。';
+    box.appendChild(tip);
+  } else {
+    const groups = {};
+    list.forEach((v) => { const g = voiceGroup(v.lang); (groups[g] = groups[g] || []).push(v); });
+    Object.keys(groups).forEach((g) => {
+      const title = document.createElement('div');
+      title.className = 'voice-group-title';
+      title.textContent = `${g} · ${groups[g].length}`;
+      box.appendChild(title);
+      groups[g].forEach((v) => {
+        const row = document.createElement('button');
+        const active = store.voice ? store.voice === v.voiceURI : v.default;
+        row.className = 'voice-row' + (active ? ' selected' : '');
+        const tag = (v.localService ? '本地' : '在线') + ' · ' + (v.lang || '');
+        row.innerHTML = `<span class="voice-dot"><svg class="icon"><use href="#i-volume"/></svg></span>
+          <span class="voice-name">${esc(voiceLabel(v))}</span><span class="voice-tag">${esc(tag)}</span>
+          <svg class="icon check"><use href="#i-check"/></svg>`;
+        row.onclick = () => {
+          store.voice = v.voiceURI; persist(); renderVoices();
+          const sel = getSelectedVoice();
+          byId('voiceValue').textContent = sel ? voiceLabel(sel) : '系统默认';
+          stopSpeech();
+          const u = new SpeechSynthesisUtterance('你好，这是你选的朗读声音。');
+          u.voice = v; u.lang = v.lang; u.rate = store.speechRate ?? 1;
+          window.speechSynthesis.speak(u);
+        };
+        box.appendChild(row);
+      });
+    });
+  }
+
+  const sel0 = getSelectedVoice();
+  byId('voiceValue').textContent = sel0 ? voiceLabel(sel0) : '系统默认';
+
+  const toggle = byId('autoReadToggle');
+  if (toggle) toggle.onchange = () => { store.autoRead = toggle.checked; persist(); if (!toggle.checked) stopSpeech(); };
+  const rate = byId('speechRate');
+  if (rate) rate.oninput = () => { store.speechRate = parseFloat(rate.value); byId('rateVal').textContent = store.speechRate.toFixed(1) + '×'; persist(); };
+  const refresh = byId('voiceRefresh');
+  if (refresh) refresh.onclick = () => { window.speechSynthesis?.getVoices(); renderVoices(); toast('已重新读取设备声音'); };
 }
 
 /* ---------- 语音通话 + 语音输入 ---------- */
@@ -982,7 +1088,11 @@ function boot() {
   renderTasks();
   renderHistory();
   renderCreateTabs();
-  if (window.speechSynthesis) window.speechSynthesis.getVoices();
+  // 手机和 Chrome 首次 getVoices 常为空，等系统把声音列表加载好再重画
+  if (window.speechSynthesis) {
+    window.speechSynthesis.getVoices();
+    window.speechSynthesis.addEventListener?.('voiceschanged', renderVoices);
+  }
   if (isCloudHost()) {
     initCloud();
   } else {

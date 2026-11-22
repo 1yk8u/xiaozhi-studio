@@ -307,6 +307,19 @@ h1, h2, h3, h4, p { margin: 0; }
 
 /* 朗读列表 */
 .voice-list { background: #fff; border-radius: var(--radius-card); box-shadow: var(--shadow-1); overflow: hidden; margin-top: 6px; }
+.voice-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+.voice-head p { font-size: 12.5px; line-height: 1.65; color: var(--ink-3); margin: 0 0 12px; }
+.voice-head p b { color: var(--brand); font-weight: 600; }
+.voice-switches { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.voice-switch { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.voice-switch input { accent-color: var(--brand); width: 15px; height: 15px; }
+.voice-rate { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+.voice-rate input[type=range] { width: 96px; accent-color: var(--brand); }
+.voice-rate span { min-width: 30px; color: var(--brand); font-variant-numeric: tabular-nums; }
+.voice-refresh { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--brand); background: var(--brand-soft); border: 0; border-radius: 10px; padding: 6px 11px; cursor: pointer; }
+.voice-refresh .icon { width: 14px; height: 14px; }
+.voice-group-title { padding: 11px 16px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; color: var(--ink-3); background: #fafafb; }
+.voice-empty { padding: 26px 16px; text-align: center; font-size: 13px; line-height: 1.7; color: var(--ink-3); }
 .voice-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 8px 16px; border-bottom: 1px solid var(--line); text-align: left; width: 100%; }
 .voice-row:last-child { border-bottom: 0; }
 .voice-row.selected { background: #f4fbf6; }
