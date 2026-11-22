@@ -263,8 +263,18 @@
       // 握手已成功过才叫"已连接"，否则是"连接失败"
       if (!opened) {
         failedAttempts++;
-        setStatus('连接失败（' + (ev.code || '无响应') + '）', 'err');
-        log('连接失败，code=' + (ev.code || '-') + '，连续失败 ' + failedAttempts + ' 次', 'err');
+        // 1006 是浏览器端"连接被中途掐断"，把最可能的原因说清楚
+        if (ev.code === 1006) {
+          setStatus('连接被断开（1006）', 'err');
+          log('连接被服务器断开：常见原因是 token 已在别处使用、或网络不稳定。', 'err');
+          log('连续失败 ' + failedAttempts + ' 次', 'err');
+        } else if (ev.code === 1008 || ev.code === 4401 || ev.code === 4403) {
+          setStatus('token 被拒绝（' + ev.code + '）', 'err');
+          log('服务器拒绝了这个 token，请去小智平台重新复制 token 再填。', 'err');
+        } else {
+          setStatus('连接失败（' + (ev.code || '无响应') + '）', 'err');
+          log('连接失败，code=' + (ev.code || '-') + '，连续失败 ' + failedAttempts + ' 次', 'err');
+        }
       } else {
         setStatus('已断开', '');
         log('连接已关闭（code ' + (ev.code || '-') + '）');
@@ -341,7 +351,11 @@
     }
     if (conn) conn.addEventListener('click', () => {
       const v = (input.value || '').trim();
-      if (v && v !== token()) { localStorage.setItem(TOKEN_KEY, v); localStorage.setItem(AUTO_KEY, '1'); }
+      if (v && v !== token()) { localStorage.setItem(TOKEN_KEY, v); }
+      // 手动点连接 = 重新开始：清零失败计数、恢复自动重连
+      failedAttempts = 0;
+      reconnectDelay = 2000;
+      localStorage.setItem(AUTO_KEY, '1');
       connect();
     });
     if (disc) disc.addEventListener('click', disconnect);
