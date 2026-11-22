@@ -306,6 +306,9 @@ h1, h2, h3, h4, p { margin: 0; }
 .profile-info span { font-size: 12.5px; color: var(--ink-3); }
 
 /* 朗读列表 */
+/* 暂时收起的独立入口（编程工具 / AI 创作）：删掉元素上的 paused-entry 类即可恢复 */
+.paused-entry { display: none !important; }
+
 .voice-list { background: #fff; border-radius: var(--radius-card); box-shadow: var(--shadow-1); overflow: hidden; margin-top: 6px; }
 .voice-head { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
 .voice-head p { font-size: 12.5px; line-height: 1.65; color: var(--ink-3); margin: 0 0 12px; }

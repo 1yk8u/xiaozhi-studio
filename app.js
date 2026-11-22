@@ -21,7 +21,7 @@ const SKILLS = [
   { name: '性格测试', desc: '趣味测试，认真解读结果', emoji: '✨', bg: '#fff4e5', prompt: '给我出一个有趣的性格测试，10 道题以内，答完给解读。' },
   { name: '饮食助手', desc: '拍一张，帮你分析热量和搭配', emoji: '🥗', bg: '#eaf8e9', prompt: '我想改善饮食，帮我做一份一周午餐搭配，说明大致热量和营养重点。' },
   { name: '对比解读', desc: '把链接或两段内容摆在一起看差别', emoji: '📊', bg: '#ece9ff', fav: 1, prompt: '我给你两段内容，帮我做一份逐项对比，指出关键差异和各自适用场景。' },
-  { name: '图片创作', desc: '用描述生成一张矢量插画', emoji: '🎨', bg: '#e9f4ff', action: 'create-image', prompt: '画一张图：' },
+  { name: '图片创作', desc: '用描述生成一张矢量插画', emoji: '🎨', bg: '#e9f4ff', prompt: '画一张图：' },
   { name: '个人计划', desc: '把目标拆成每天能做的事', emoji: '👥', bg: '#eaf2ff', prompt: '帮我把一个目标拆成可执行的周计划，标注优先级和验收标准。' },
   { name: 'PPT 制作', desc: '把主题材料做成可编辑大纲', emoji: '📙', bg: '#fff3e2', fav: 1, prompt: '帮我把主题做成 PPT 逐页大纲，每页给标题、要点和备注。' },
   { name: 'Excel 表格', desc: '整理计算分析数据，生成表格', emoji: '📗', bg: '#e8f8ec', prompt: '帮我设计一张表格结构，包含字段、公式和数据校验思路。' },
@@ -30,7 +30,7 @@ const SKILLS = [
   { name: '专业教案写作', desc: '按课标写出可直接用的教案', emoji: '📝', bg: '#eef4ff', prompt: '帮我写一份教案，包含教学目标、重难点、过程和板书设计。' },
   { name: '科研问题构思', desc: '从选题到方法帮你理思路', emoji: '💡', bg: '#fff6dc', prompt: '帮我梳理一个研究选题：背景、问题、方法和可能的创新点。' },
   { name: '作业批改', desc: '逐题分析，指出错因', emoji: '✅', bg: '#e9f8ef', prompt: '我发一份作业给你，请逐题批改并指出错因。' },
-  { name: 'AI 生视频', desc: '写分镜脚本和运镜说明', emoji: '🎬', bg: '#f0eaff', action: 'create-video', prompt: '为我写一个视频分镜：' },
+  { name: 'AI 生视频', desc: '写分镜脚本和运镜说明', emoji: '🎬', bg: '#f0eaff', prompt: '为我写一个视频分镜：' },
   { name: '深度研究', desc: '拆问题、找资料、给结论', emoji: '🔍', bg: '#e9f2ff', prompt: '帮我深入研究一个问题，列出关键事实、不同观点和你的判断依据。' },
   { name: '金融理财', desc: '梳理账目和收支结构', emoji: '💰', bg: '#fdf4e4', prompt: '帮我分析收支结构，给出可执行的整理建议。' },
   { name: '数据分析', desc: '从数据里找出真正有用的结论', emoji: '📈', bg: '#e8f7f6', prompt: '我给你一组数据，帮我找出趋势、异常和值得追问的点。' },
@@ -265,7 +265,7 @@ document.addEventListener('click', (e) => {
     'close-side': () => byId('sidePanel').style.display = 'none',
     'read-last': readLast,
     camera: () => toast('相机权限需要 HTTPS 环境，本地预览可先直接输入文字'),
-    attach: () => goto('create'),
+    attach: () => toast('直接把要做的告诉小智，写代码、出图都能在对话里完成'),
     'voice-input': toggleVoiceInput,
     'pick-mode': () => openSheet('modelSheet'),
     'voice-person': () => goto('voices'),
@@ -699,9 +699,7 @@ function renderSkills() {
       <div class="skill-info"><div class="skill-name">${esc(s.name)}</div><div class="skill-desc">${esc(s.desc)}</div></div>
       <button class="use-btn">使用</button>`;
     row.querySelector('.use-btn').onclick = () => {
-      if (s.action === 'create-image') { state.createType = 'image'; renderCreateTabs(); goto('create'); return; }
-      if (s.action === 'create-video') { state.createType = 'video'; renderCreateTabs(); goto('create'); return; }
-      goto('chat'); setInput(s.prompt);
+      goto('chat'); setInput(s.prompt); // 所有技能统一走对话，不在独立面板里操作
     };
     box.appendChild(row);
   });

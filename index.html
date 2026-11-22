@@ -75,12 +75,13 @@
     </button>
 
     <nav class="drawer-nav">
-      <button class="nav-item" data-goto="create">
+      <!-- 编程工具、AI 创作两个独立入口暂时收起：这些能力通过跟小智对话来用。想恢复：删掉 paused-entry 这个 class 即可。 -->
+      <button class="nav-item paused-entry" data-goto="create">
         <svg class="icon"><use href="#i-spark"/></svg>
         <span class="nav-label">AI 创作</span>
         <span class="nav-hint">写诗、画图、分镜</span>
       </button>
-      <button class="nav-item" data-goto="tools">
+      <button class="nav-item paused-entry" data-goto="tools">
         <svg class="icon"><use href="#i-code"/></svg>
         <span class="nav-label">编程工具</span>
       </button>
