@@ -65,24 +65,35 @@ const TOOLS = [
 
 /* 声音不再写死：直接用设备上真实安装的语音引擎，有多少列多少 */
 function getSystemVoices() {
-  try { return window.speechSynthesis?.getVoices() || []; } catch (e) { return []; }
+  try {
+    const all = window.speechSynthesis?.getVoices() || [];
+    const hidden = store.hiddenVoices || [];
+    return all.filter((v) => !hidden.includes(v.voiceURI) && !hidden.includes(v.name));
+  } catch (e) { return []; }
 }
+// 语言分组的固定顺序：中文永远排最前，English 放后面
+const VOICE_GROUP_ORDER = ['中文', '粤语', '英文', '日语', '韩语', '其他语言'];
+// iOS 上 speechSynthesis 不宜延迟调用（会脱离用户手势）；Chrome 需要延迟避开 cancel 吞音
+const UA = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+const IS_IOS = /iPhone|iPad|iPod/i.test(UA);
+function laterSpeak(fn, ms) { if (IS_IOS) fn(); else setTimeout(fn, ms || 140); }
 function voiceGroup(lang) {
   const l = (lang || '').toLowerCase();
   if (l.startsWith('yue') || (l.startsWith('zh') && l.includes('hk'))) return '粤语';
   if (l.startsWith('zh')) return '中文';
-  if (l.startsWith('en')) return 'English';
-  if (l.startsWith('ja')) return '日本語';
-  if (l.startsWith('ko')) return '한국어';
+  if (l.startsWith('en')) return '英文';
+  if (l.startsWith('ja')) return '日语';
+  if (l.startsWith('ko')) return '韩语';
   return '其他语言';
 }
 function getSelectedVoice() {
   const list = getSystemVoices();
   if (!list.length) return null;
-  const exact = list.find((v) => v.voiceURI === store.voice);
+  const exact = list.find((v) => v.voiceURI === store.voice || v.name === store.voice);
   if (exact) return exact;
-  const zh = list.find((v) => (v.lang || '').toLowerCase().startsWith('zh'));
-  return zh || list.find((v) => v.default) || list[0];
+  // 默认挑一个中文声音（优先本地），不再落到英文上
+  const zh = list.filter((v) => (v.lang || '').toLowerCase().startsWith('zh'));
+  return (zh.find((v) => v.localService) || zh[0]) || list.find((v) => v.default) || list[0];
 }
 
 const PROMPTS = [
@@ -103,6 +114,7 @@ const THEMES = [
 const STORE_KEY = 'xiaozhi-studio-v1';
 const defaults = {
   voice: '', speechRate: 1, speechPitch: 1, autoRead: true, theme: '默认', memoryOn: true,
+  hiddenVoices: [],
   history: [], tasks: [], memories: [], assets: [], favs: ['旅游计划', '对比解读', 'PPT 制作'],
 };
 let store = { ...defaults };
@@ -593,13 +605,19 @@ function flushSpeechQueue() {
   const text = speechQ.queue.shift();
   const utter = new SpeechSynthesisUtterance(text.slice(0, 200));
   const v = getSelectedVoice();
-  if (v) { utter.voice = v; utter.lang = v.lang; }
+  // 某些设备给的 voice 对象可能失效，赋值失败不能让整个朗读崩掉
+  if (v) { try { utter.voice = v; } catch (e) {} utter.lang = v.lang || 'zh-CN'; }
   utter.rate = store.speechRate ?? 1;
   utter.pitch = store.speechPitch ?? 1;
   utter.onstart = () => setOrbListening(true);
   utter.onend = () => { setOrbListening(false); speechQ.speaking = false; flushSpeechQueue(); };
   utter.onerror = () => { speechQ.speaking = false; flushSpeechQueue(); };
-  window.speechSynthesis.speak(utter);
+  // 关键修复：cancel() 之后立刻 speak() 在很多浏览器（尤其手机 Chrome）会被吞掉。
+  // 稍等一帧再 speak，并且补一次 resume，保证切换声音后也能正常出声。
+  laterSpeak(() => {
+    try { window.speechSynthesis.resume(); } catch (e) {}
+    window.speechSynthesis.speak(utter);
+  }, 120);
 }
 function enqueueSpeech(text) {
   splitSentences(cleanForSpeech(text)).forEach((s) => speechQ.queue.push(s));
@@ -648,6 +666,18 @@ function voiceLabel(v) {
   // 系统给的名字常带一堆括号与连字符，这里只做轻微清理，保留真实身份
   return (v.name || v.voiceURI || '未命名').replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
 }
+// 把 en-US / zh-CN 这类语言代码显示成中文
+function langLabel(lang) {
+  const l = (lang || '').toLowerCase();
+  if (!l) return '';
+  if (l.startsWith('zh') && l.includes('hk')) return '粤语';
+  if (l.startsWith('yue')) return '粤语';
+  if (l.startsWith('zh')) return '中文';
+  if (l.startsWith('en')) return l.includes('gb') ? '英文(英)' : '英文(美)';
+  if (l.startsWith('ja')) return '日语';
+  if (l.startsWith('ko')) return '韩语';
+  return '其他';
+}
 
 function renderVoices() {
   const box = byId('voiceList');
@@ -673,27 +703,49 @@ function renderVoices() {
   } else {
     const groups = {};
     list.forEach((v) => { const g = voiceGroup(v.lang); (groups[g] = groups[g] || []).push(v); });
-    Object.keys(groups).forEach((g) => {
+    // 固定顺序：中文、粤语、日语… English 放最后。列表开头不再是英文。
+    const orderOf = (g) => { const i = VOICE_GROUP_ORDER.indexOf(g); return i < 0 ? 99 : i; };
+    const sortedGroups = Object.keys(groups).sort((a, b) => orderOf(a) - orderOf(b));
+    const sel = getSelectedVoice();
+    sortedGroups.forEach((g) => {
       const title = document.createElement('div');
       title.className = 'voice-group-title';
       title.textContent = `${g} · ${groups[g].length}`;
       box.appendChild(title);
       groups[g].forEach((v) => {
-        const row = document.createElement('button');
-        const active = store.voice ? store.voice === v.voiceURI : v.default;
+        const row = document.createElement('div');
+        const active = sel && (sel.voiceURI === v.voiceURI || sel.name === v.name);
         row.className = 'voice-row' + (active ? ' selected' : '');
-        const tag = (v.localService ? '本地' : '在线') + ' · ' + (v.lang || '');
-        row.innerHTML = `<span class="voice-dot"><svg class="icon"><use href="#i-volume"/></svg></span>
-          <span class="voice-name">${esc(voiceLabel(v))}</span><span class="voice-tag">${esc(tag)}</span>
-          <svg class="icon check"><use href="#i-check"/></svg>`;
-        row.onclick = () => {
-          store.voice = v.voiceURI; persist(); renderVoices();
-          const sel = getSelectedVoice();
-          byId('voiceValue').textContent = sel ? voiceLabel(sel) : '系统默认';
+        const tag = (v.localService ? '本地' : '在线') + ' · ' + langLabel(v.lang);
+        row.innerHTML = `<button class="voice-pick" type="button">
+            <span class="voice-dot"><svg class="icon"><use href="#i-volume"/></svg></span>
+            <span class="voice-name">${esc(voiceLabel(v))}</span>
+            <span class="voice-tag">${esc(tag)}</span>
+            <svg class="icon check"><use href="#i-check"/></svg>
+          </button>
+          <button class="voice-del" type="button" title="删掉这个声音" aria-label="删掉 ${esc(voiceLabel(v))}">×</button>`;
+        // 点选：只改选中态和试听，不重建整个列表（重建会打断朗读、就是"重新来"的毛病）
+        row.querySelector('.voice-pick').onclick = () => {
+          store.voice = v.voiceURI; persist();
+          box.querySelectorAll('.voice-row').forEach((r) => r.classList.remove('selected'));
+          row.classList.add('selected');
+          byId('voiceValue').textContent = voiceLabel(v);
           stopSpeech();
           const u = new SpeechSynthesisUtterance('你好，这是你选的朗读声音。');
-          u.voice = v; u.lang = v.lang; u.rate = store.speechRate ?? 1;
-          window.speechSynthesis.speak(u);
+          try { u.voice = v; } catch (e) {} u.lang = v.lang || 'zh-CN'; u.rate = store.speechRate ?? 1;
+          laterSpeak(() => {
+            try { window.speechSynthesis.resume(); } catch (e) {}
+            window.speechSynthesis.speak(u);
+          }, 120);
+        };
+        // 删掉：把这个声音加入隐藏名单，永久不再显示
+        row.querySelector('.voice-del').onclick = (e) => {
+          e.stopPropagation();
+          store.hiddenVoices = store.hiddenVoices || [];
+          if (!store.hiddenVoices.includes(v.voiceURI)) store.hiddenVoices.push(v.voiceURI);
+          if (store.voice === v.voiceURI || store.voice === v.name) store.voice = '';
+          persist(); renderVoices();
+          toast('已删掉「' + voiceLabel(v) + '」，可在底部恢复');
         };
         box.appendChild(row);
       });
@@ -702,6 +754,15 @@ function renderVoices() {
 
   const sel0 = getSelectedVoice();
   byId('voiceValue').textContent = sel0 ? voiceLabel(sel0) : '系统默认';
+
+  // 恢复被删掉的声音
+  if ((store.hiddenVoices || []).length) {
+    const restore = document.createElement('button');
+    restore.className = 'voice-restore';
+    restore.textContent = `恢复已删掉的声音（${store.hiddenVoices.length}）`;
+    restore.onclick = () => { store.hiddenVoices = []; persist(); renderVoices(); toast('已恢复全部声音'); };
+    box.appendChild(restore);
+  }
 
   const toggle = byId('autoReadToggle');
   if (toggle) toggle.onchange = () => { store.autoRead = toggle.checked; persist(); if (!toggle.checked) stopSpeech(); };
