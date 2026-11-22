@@ -264,12 +264,86 @@
           <button class="set-row" data-goto="voice-settings"><svg class="icon"><use href="#i-person"/></svg><span>个性化</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="theme"><svg class="icon"><use href="#i-palette"/></svg><span>主题色</span><span class="row-value" id="themeValue">默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="voices"><svg class="icon"><use href="#i-book"/></svg><span>朗读设置</span><span class="row-value" id="voiceValue">静静</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row" data-goto="qianfan"><svg class="icon"><use href="#i-spark"/></svg><span>千帆 AI（免费模型）</span><span class="row-value" id="qfStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="mcp"><svg class="icon"><use href="#i-brain"/></svg><span>小智 AI 连接</span><span class="row-value" id="mcpStatusMini">未连接</span><svg class="icon chev"><use href="#i-right"/></svg></button>
         </div>
         <div class="settings-group">
           <button class="set-row" data-action="notice"><svg class="icon"><use href="#i-bell"/></svg><span>消息通知</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row" data-goto="sync"><svg class="icon"><use href="#i-shield"/></svg><span>数据同步（GitHub）</span><span class="row-value" id="syncStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="privacy"><svg class="icon"><use href="#i-shield"/></svg><span>数据与隐私</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="about"><svg class="icon"><use href="#i-info"/></svg><span>关于小智</span><span class="row-value">v1.0</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 数据同步 -->
+    <section class="view view-panel" id="view-sync">
+      <header class="subtopbar">
+        <button class="icon-btn" data-goto="settings" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button>
+        <h1>数据同步</h1>
+      </header>
+      <div class="panel-scroll">
+        <div class="qf-intro">
+          <div class="qf-badge">GitHub 私有仓库</div>
+          <p>把对话、任务、记忆存到你自己的私有仓库。手机和电脑填同一个 token，数据就同步了。token 只存本机，不进代码。</p>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <label class="field-label">GitHub 令牌（fine-grained PAT）</label>
+          <div class="mcp-token-row">
+            <input id="ghToken" type="password" placeholder="github_pat_... 只给数据仓库 Contents 读写权限" autocomplete="off" spellcheck="false">
+            <button class="mini-btn" id="ghToggle" aria-label="显示/隐藏"><svg class="icon"><use href="#i-search"/></svg></button>
+          </div>
+          <label class="field-label" style="margin-top:12px">数据仓库</label>
+          <input id="ghRepo" class="gh-repo-input" value="1yk8u/xiaozhi-studio-data" spellcheck="false">
+          <div class="mcp-actions">
+            <button class="mcp-btn ghost" id="ghSave">保存</button>
+            <button class="mcp-btn primary" id="ghUpload">上传到 GitHub</button>
+            <button class="mcp-btn ghost" id="ghDownload">从 GitHub 拉取</button>
+          </div>
+          <p class="mcp-hint" id="ghResult">需要 fine-grained PAT，勾选仓库 1yk8u/xiaozhi-studio-data 的 Contents: read and write。</p>
+          <details class="gh-help" style="margin-top:12px">
+            <summary>怎么生成令牌？</summary>
+            <ol>
+              <li>打开 GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens</li>
+              <li>Generate new token，Repository access 选「Only select repositories」勾选 xiaozhi-studio-data</li>
+              <li>Permissions → Contents 设为 Read and write</li>
+              <li>生成后复制 github_pat_ 开头的串，粘到上面保存</li>
+            </ol>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <!-- 千帆 AI 设置 -->
+    <section class="view view-panel" id="view-qianfan">
+      <header class="subtopbar">
+        <button class="icon-btn" data-goto="settings" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button>
+        <h1>千帆 AI</h1>
+      </header>
+      <div class="panel-scroll">
+        <div class="qf-intro">
+          <div class="qf-badge">百度千帆</div>
+          <p>填入你自己的千帆 API Key，就能用百度官方免费模型（ERNIE Speed / Lite / 3.5 等）。key 只存在这台设备，不进代码、不上传。</p>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <label class="field-label">千帆 API Key</label>
+          <div class="mcp-token-row">
+            <input id="qfKey" type="password" placeholder="粘贴 bce-v3/ALTAK-... 格式的 key" autocomplete="off" spellcheck="false">
+            <button class="mini-btn" id="qfToggle" aria-label="显示/隐藏"><svg class="icon"><use href="#i-search"/></svg></button>
+          </div>
+          <div class="mcp-actions">
+            <button class="mcp-btn ghost" id="qfSave">保存并测试</button>
+            <button class="mcp-btn ghost" id="qfClear">清除</button>
+          </div>
+          <p class="mcp-hint" id="qfTestResult">key 来自百度千帆控制台「应用接入」。免费模型需在控制台点一下「开通」。</p>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <div class="mcp-sec-head"><strong>免费模型</strong><span id="qfModelCount"></span></div>
+          <div id="qfModels" class="mcp-tools"></div>
+          <p class="mcp-hint">保存 key 后，点顶部模型切换就能看到这些模型并选用。标「免费」的是官方免费额度模型。</p>
         </div>
       </div>
     </section>
@@ -431,6 +505,8 @@
     else window.__sdkWaiters.push(fn);
   };
 </script>
+<script src="qianfan.js"></script>
+<script src="github-sync.js"></script>
 <script src="app.js"></script>
 <script src="mcp.js"></script>
 </body>

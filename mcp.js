@@ -15,6 +15,8 @@
   let reconnectTimer = null;
   let reconnectDelay = 2000;
   let callCount = 0;
+  let failedAttempts = 0; // 连续连接失败次数，用于停止无限重连
+  let handshakeTimer = null;
 
   // 网页暴露给小智 AI 的工具。description 写清楚，小智才知道何时调用。
   const TOOLS = [
@@ -122,7 +124,7 @@
             XZ.systemPrompt
           );
         } else {
-          text = `已收到写代码需求：${req}（${lang}）。但当前网页没有连上云端模型，无法生成真实代码。请在云端版打开并等待模型连接。`;
+          text = `已收到写代码需求：${req}（${lang}）。但当前网页没有可用模型，无法生成真实代码。请去「设置 → 千帆 AI」填 key，或用云端版链接。`;
         }
       } else if (name === 'generate_image') {
         const prompt = args.prompt || '';
@@ -181,6 +183,10 @@
       return;
     }
     if (method === 'notifications/initialized') {
+      connected = true;
+      clearTimeout(handshakeTimer);
+      failedAttempts = 0;
+      updateButtons();
       setStatus('小智 AI 已连接', 'on');
       log('小智 AI 已就绪', 'ok');
       return;
@@ -207,37 +213,68 @@
     const tk = token();
     if (!tk) {
       if (window.XZ?.toast) window.XZ.toast('请先填入小智 MCP token');
+      setStatus('未配置 token', '');
       return;
     }
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
     setStatus('正在连接…', 'wait');
     log('正在连接小智 AI…');
+    let opened = false;
     try {
       ws = new WebSocket(MCP_ENDPOINT + '?token=' + encodeURIComponent(tk));
     } catch (err) {
-      setStatus('连接失败', 'err');
+      setStatus('连接失败：' + (err.message || '地址错误'), 'err');
       log('WebSocket 创建失败：' + err.message, 'err');
       return;
     }
 
+    // 握手超时：连上 12 秒还没收到 initialized，判定 token/端点无效
+    clearTimeout(handshakeTimer);
+    handshakeTimer = setTimeout(() => {
+      if (!connected) {
+        setStatus('连接超时：token 可能无效', 'err');
+        log('握手超时：token 可能无效或端点不可用，停止自动重连', 'err');
+        try { ws?.close(); } catch (e) {}
+        localStorage.setItem(AUTO_KEY, '0'); // 停止重连，避免刷屏
+        updateButtons();
+      }
+    }, 12000);
+
     ws.onopen = () => {
-      connected = true;
+      opened = true;
+      failedAttempts = 0;
       reconnectDelay = 2000;
       updateButtons();
-      setStatus('连接中，握手中…', 'wait');
+      setStatus('握手中…', 'wait');
       log('WebSocket 已打开，等待小智握手');
     };
     ws.onmessage = (ev) => handleMessage(ev.data);
     ws.onerror = () => {
-      log('连接出错（token 可能失效或网络问题）', 'err');
+      if (!opened) {
+        setStatus('连接失败：检查网络/token', 'err');
+        log('连接出错：网络不通或 token 无效', 'err');
+      }
     };
     ws.onclose = (ev) => {
       connected = false;
+      clearTimeout(handshakeTimer);
       updateButtons();
-      setStatus('未连接', '');
-      log('连接已关闭' + (ev.code ? '（code ' + ev.code + '）' : ''));
-      // 仅在开启自动重连时重试
+      // 握手已成功过才叫"已连接"，否则是"连接失败"
+      if (!opened) {
+        failedAttempts++;
+        setStatus('连接失败（' + (ev.code || '无响应') + '）', 'err');
+        log('连接失败，code=' + (ev.code || '-') + '，连续失败 ' + failedAttempts + ' 次', 'err');
+      } else {
+        setStatus('已断开', '');
+        log('连接已关闭（code ' + (ev.code || '-') + '）');
+      }
+      // 失败 3 次就停，避免无限重连刷屏
+      if (failedAttempts >= 3) {
+        log('连续失败 3 次，停止自动重连。请检查 token 后手动点连接。', 'err');
+        localStorage.setItem(AUTO_KEY, '0');
+        return;
+      }
       if (localStorage.getItem(AUTO_KEY) !== '0' && token()) {
         log(`${reconnectDelay / 1000} 秒后重连…`);
         clearTimeout(reconnectTimer);

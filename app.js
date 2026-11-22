@@ -125,7 +125,36 @@ const state = {
   createType: 'image',
   recognition: null,
   cloudReady: false,
+  qianfanReady: !!window.QIANFAN?.getKey?.(),
 };
+
+/* ---------- 统一模型通道：云端 SDK 或千帆 ---------- */
+function currentSource() { return state.model?.source === 'qianfan' ? 'qianfan' : 'cloud'; }
+
+// 统一流式接口：产出纯文本增量，屏蔽底层差异
+async function* streamChat(messages, signal) {
+  const src = currentSource();
+  if (src === 'qianfan') {
+    if (!window.QIANFAN) throw new Error('千帆脚本还没加载，刷新页面重试');
+    for await (const text of window.QIANFAN.chatStream(messages, state.model.id, signal)) {
+      yield text;
+    }
+    return;
+  }
+  if (!state.cloudReady) throw new Error('云端还没连上，刷新页面重试');
+  for await (const chunk of cloud.llm.chat.completions.create({
+    model: state.model.id,
+    messages,
+    stream: true,
+    temperature: 0.7,
+    stream_options: { include_usage: true },
+    signal,
+  })) {
+    const delta = chunk.choices?.[0]?.delta;
+    if (delta?.content) yield delta.content;
+    if (delta?.refusal) yield `\n\n${delta.refusal}`;
+  }
+}
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -163,22 +192,55 @@ function initCloud() {
   }
 }
 
+function qianfanModels() {
+  if (!window.QIANFAN?.getKey?.()) return [];
+  return window.QIANFAN.models().map((m) => ({
+    id: m.id,
+    name: m.name,
+    description: m.note,
+    source: 'qianfan',
+    free: m.free,
+  }));
+}
+
+function assembleModels(cloudModels = []) {
+  const normalized = cloudModels.filter((m) => m.disabled !== true).map((m) => ({
+    id: m.id, name: m.name || m.id, description: m.description || '云端模型', source: 'cloud',
+  }));
+  const qf = qianfanModels();
+  // 去重：同 id 以千帆为准（明确标 source）
+  const seen = new Set(normalized.map((m) => m.id));
+  const merged = [...normalized, ...qf.filter((m) => !seen.has(m.id))];
+  state.models = merged;
+  if (!merged.length) return false;
+  const savedId = store.modelId;
+  state.model = merged.find((m) => m.id === savedId) || merged[0];
+  return true;
+}
+
 async function loadModels() {
   byId('modelCurrent').textContent = '正在获取可用模型…';
-  try {
-    const models = await cloud.llm.models.list();
-    state.models = models.filter((m) => m.disabled !== true);
-    if (!state.models.length) {
-      byId('modelCurrent').textContent = '当前没有可用模型，稍后再试。';
-      return;
+  let cloudModels = [];
+  if (state.cloudReady) {
+    try {
+      cloudModels = await cloud.llm.models.list();
+    } catch (err) {
+      // 云端拉取失败不致命，千帆模型照样可用
     }
-    const savedId = store.modelId;
-    state.model = state.models.find((m) => m.id === savedId) || state.models[0];
-    byId('modelCurrent').textContent = `当前可用 ${state.models.length} 个模型 · 选一个合适的开始`;
+  }
+  // 千帆 key 一填就能进列表，即使云端完全没连上
+  if (assembleModels(cloudModels)) {
+    const qfCount = state.models.filter((m) => m.source === 'qianfan').length;
+    const parts = [];
+    if (state.cloudReady) parts.push(`${cloudModels.length} 个云端模型`);
+    if (qfCount) parts.push(`${qfCount} 个千帆模型`);
+    byId('modelCurrent').textContent = parts.length
+      ? `可选：${parts.join(' + ')}`
+      : '当前没有可用模型，去设置里填千帆 key 或刷新。';
     renderModelOptions();
     updateSideContext();
-  } catch (err) {
-    byId('modelCurrent').textContent = '模型列表没取到：' + friendlyError(err);
+  } else {
+    byId('modelCurrent').textContent = '没有可用模型：去「设置 → 千帆 AI」填 key，或用云端版链接。';
   }
 }
 
@@ -190,7 +252,10 @@ function renderModelOptions() {
     btn.className = 'model-option' + (state.model?.id === m.id ? ' selected' : '');
     const name = m.name || m.id;
     const desc = m.description || ['快答：日常问题，响应更快', '深度：复杂推理，想得更透', '专家：适合多步任务'][Math.min(i, 2)];
-    btn.innerHTML = `<span class="mo-main"><strong>${esc(name)}</strong><small>${esc(desc)}</small></span><svg class="icon check"><use href="#i-check"/></svg>`;
+    const tag = m.source === 'qianfan'
+      ? `<span class="mo-tag ${m.free ? 'free' : ''}">${m.free ? '免费' : '千帆'}</span>`
+      : '';
+    btn.innerHTML = `<span class="mo-main"><strong>${esc(name)} ${tag}</strong><small>${esc(desc)}</small></span><svg class="icon check"><use href="#i-check"/></svg>`;
     btn.onclick = () => {
       state.model = m;
       store.modelId = m.id;
@@ -387,8 +452,8 @@ async function sendMessage(override) {
   thinking.textContent = '小智正在想…';
   reply.content.appendChild(thinking);
 
-  if (!state.cloudReady || !state.model) {
-    thinking.textContent = '云端还没连上。刷新页面重试；如果在 GitHub Pages 上打开，需要用云端版链接才能调用模型。';
+  if (!state.model) {
+    thinking.textContent = '没有可用模型。去「设置 → 千帆 AI」填入 key，或刷新页面重试。';
     return;
   }
 
@@ -407,25 +472,11 @@ async function sendMessage(override) {
 
   try {
     thinking.remove();
-    for await (const chunk of cloud.llm.chat.completions.create({
-      model: state.model.id,
-      messages,
-      stream: true,
-      temperature: 0.7,
-      stream_options: { include_usage: true },
-      signal: state.controller.signal,
-    })) {
-      const delta = chunk.choices?.[0]?.delta;
-      if (delta?.content) {
-        full += delta.content;
-        reply.content.innerHTML = renderText(full);
-        scrollToBottom();
-        feedSpeechWhileTyping(full); // 文字蹦的同时，把完整句送去朗读
-      }
-      if (delta?.refusal) {
-        full += `\n\n${delta.refusal}`;
-        reply.content.innerHTML = renderText(full);
-      }
+    for await (const text of streamChat(messages, state.controller.signal)) {
+      full += text;
+      reply.content.innerHTML = renderText(full);
+      scrollToBottom();
+      feedSpeechWhileTyping(full); // 文字蹦的同时，把完整句送去朗读
     }
     if (!full) {
       reply.content.innerHTML = '<span style="color:var(--ink-3)">这次没有返回内容，点重新生成试试。</span>';
@@ -708,9 +759,9 @@ function setVoiceTranscript(who, text) {
 
 // 语音通话：把识别出的话发给 AI，回复打到通话页并出声朗读
 async function callAIFromVoice(text) {
-  if (!state.cloudReady || !state.model) {
-    setVoiceStatus('云端还没连上。刷新页面重试；GitHub 静态版请用云端版链接才能对话。');
-    toast('当前是静态版，真 AI 对话请用云端版');
+  if (!state.model) {
+    setVoiceStatus('没有可用模型。去「设置 → 千帆 AI」填 key，或刷新页面。');
+    toast('先去设置里配置一个模型');
     return;
   }
   state.callContext = state.callContext || [];
@@ -719,22 +770,15 @@ async function callAIFromVoice(text) {
   stopSpeech();
   let full = '';
   try {
-    const stream = await cloud.llm.chat.completions.create({
-      model: state.model.id,
-      messages: [
-        { role: 'system', content: (typeof SYSTEM_PROMPT !== 'undefined' ? SYSTEM_PROMPT : '') + '\n\n这是语音通话，用口语化的短句回答，一两句话即可，不要列表和代码，方便朗读。' },
-        ...state.callContext.slice(-10),
-      ],
-      stream: true, temperature: 0.7,
-    });
+    const messages = [
+      { role: 'system', content: (typeof SYSTEM_PROMPT !== 'undefined' ? SYSTEM_PROMPT : '') + '\n\n这是语音通话，用口语化的短句回答，一两句话即可，不要列表和代码，方便朗读。' },
+      ...state.callContext.slice(-10),
+    ];
     let shown = false;
-    for await (const chunk of stream) {
-      const d = chunk.choices?.[0]?.delta;
-      if (d?.content) {
-        full += d.content;
-        if (!shown) { setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 小智正在说…'); shown = true; }
-        feedSpeechWhileTyping(full); // 边出字边念
-      }
+    for await (const piece of streamChat(messages, null)) {
+      full += piece;
+      if (!shown) { setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 小智正在说…'); shown = true; }
+      feedSpeechWhileTyping(full); // 边出字边念
     }
     const clean = cleanForSpeech(full);
     const tail = clean.slice(speechQ.spokenTo).trim();
@@ -875,7 +919,8 @@ byId('createTabs').addEventListener('click', (e) => {
 byId('createBtn').addEventListener('click', async () => {
   const prompt = byId('createPrompt').value.trim();
   if (!prompt) { toast('先写点描述'); return; }
-  const offline = !state.cloudReady || !state.model;
+  const offline = !state.model;
+  const style = byId('createStyle').value;
   const btn = byId('createBtn');
   btn.disabled = true; btn.textContent = '生成中…';
   const box = byId('createResult');
@@ -898,7 +943,6 @@ byId('createBtn').addEventListener('click', async () => {
     return;
   }
 
-  const style = byId('createStyle').value;
   const instructions = {
     image: `用纯 SVG 画一张插画：${prompt}。风格：${style}。要求：直接返回完整的 <svg> 标签，不要 Markdown 代码块，不要解释文字；尺寸 viewBox="0 0 800 600"，配色克制，结构清晰。`,
     video: `写一个短视频分镜脚本：${prompt}。按时间轴列出 5-7 个镜头，每个镜头给出时长、画面描述、运镜方式和旁白；最后给一句整体风格说明。用中文。`,
@@ -907,18 +951,11 @@ byId('createBtn').addEventListener('click', async () => {
 
   let full = '';
   try {
-    for await (const chunk of cloud.llm.chat.completions.create({
-      model: state.model.id,
-      messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: instructions[state.createType] },
-      ],
-      stream: true,
-      temperature: 0.9,
-      signal: new AbortController().signal,
-    })) {
-      const d = chunk.choices?.[0]?.delta;
-      if (d?.content) { full += d.content; }
+    for await (const piece of streamChat([
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: instructions[state.createType] },
+    ], new AbortController().signal)) {
+      full += piece;
     }
     renderCreation(full);
     recordAsset(state.createType === 'image' ? '图片' : state.createType === 'video' ? '视频脚本' : '网页', prompt.slice(0, 60));
@@ -1083,16 +1120,12 @@ function recordAsset(type, text) {
 
 /* ---------- 供 MCP 工具调用的通用接口 ---------- */
 async function xzAsk(prompt, system = SYSTEM_PROMPT) {
-  if (!state.cloudReady || !state.model) throw new Error('云端模型未连接');
+  if (!state.model) throw new Error('没有可用模型，去设置里填千帆 key 或连接云端');
   let out = '';
-  for await (const chunk of cloud.llm.chat.completions.create({
-    model: state.model.id,
-    messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
-    stream: true,
-    temperature: 0.7,
-  })) {
-    const d = chunk.choices?.[0]?.delta;
-    if (d?.content) out += d.content;
+  for await (const piece of streamChat([
+    { role: 'system', content: system }, { role: 'user', content: prompt },
+  ], null)) {
+    out += piece;
   }
   return out;
 }
@@ -1103,9 +1136,136 @@ window.XZ = {
   localSVG,
   localStoryboard,
   toast,
-  isCloudReady: () => state.cloudReady && !!state.model,
+  isCloudReady: () => !!state.model && (state.cloudReady || currentSource() === 'qianfan'),
   systemPrompt: SYSTEM_PROMPT,
 };
+
+/* ---------- 千帆 AI 设置页 ---------- */
+function refreshQfUI() {
+  const has = !!(window.QIANFAN?.getKey?.());
+  const mini = byId('qfStatusMini');
+  if (mini) mini.textContent = has ? '已配置' : '未配置';
+  const box = byId('qfModels');
+  if (box) {
+    const models = window.QIANFAN?.models?.() || [];
+    byId('qfModelCount').textContent = `${models.filter((m) => m.free).length} 个免费`;
+    box.innerHTML = models.map((m) =>
+      `<div class="mcp-tool"><strong>${esc(m.name)} ${m.free ? '<span class="mo-tag free">免费</span>' : ''}</strong><span>${esc(m.note)}</span></div>`
+    ).join('');
+  }
+}
+
+function initQianfanUI() {
+  const input = byId('qfKey');
+  const result = byId('qfTestResult');
+  if (input) {
+    const saved = window.QIANFAN?.getKey?.() || '';
+    input.value = saved;
+    byId('qfToggle')?.addEventListener('click', () => { input.type = input.type === 'password' ? 'text' : 'password'; });
+    byId('qfSave')?.addEventListener('click', async () => {
+      const v = (input.value || '').trim();
+      if (!v) { toast('先填入千帆 key'); return; }
+      window.QIANFAN.setKey(v);
+      refreshQfUI();
+      state.qianfanReady = true;
+      result.textContent = '正在测试 key…';
+      // 用免费模型实测一次，给用户明确结果
+      try {
+        await window.QIANFAN.ask('只回复两个字：可用', '', 'ernie-speed-8k');
+        result.textContent = '✓ key 可用，免费模型能调通。去顶部模型切换选一个开始。';
+        loadModels();
+        toast('千帆 key 已保存并验证');
+      } catch (err) {
+        result.textContent = '⚠ ' + (window.QIANFAN.friendly?.(err) || err.message);
+        loadModels();
+        toast('key 已保存，但测试没通过，看下方提示');
+      }
+    });
+    byId('qfClear')?.addEventListener('click', () => {
+      window.QIANFAN.clearKey();
+      input.value = '';
+      state.qianfanReady = false;
+      refreshQfUI();
+      result.textContent = '已清除本机 key。';
+      loadModels();
+    });
+  }
+  refreshQfUI();
+}
+
+/* ---------- GitHub 数据同步 ---------- */
+function refreshSyncUI() {
+  const has = !!(window.GHSync?.getToken?.());
+  const mini = byId('syncStatusMini');
+  if (mini) mini.textContent = has ? '已配置' : '未配置';
+}
+
+function initSyncUI() {
+  const tok = byId('ghToken');
+  const repo = byId('ghRepo');
+  const result = byId('ghResult');
+  const say = (m) => { if (result) result.textContent = m; };
+  if (repo && window.GHSync) repo.value = window.GHSync.getRepo();
+  if (tok && window.GHSync) tok.value = window.GHSync.getToken();
+
+  byId('ghToggle')?.addEventListener('click', () => { if (tok) tok.type = tok.type === 'password' ? 'text' : 'password'; });
+
+  byId('ghSave')?.addEventListener('click', async () => {
+    if (!window.GHSync) { say('同步脚本没加载，刷新页面'); return; }
+    const v = (tok?.value || '').trim();
+    if (!v) { say('先填入 GitHub token'); return; }
+    window.GHSync.setToken(v);
+    if (repo?.value.trim()) window.GHSync.setRepo(repo.value.trim());
+    refreshSyncUI();
+    say('正在验证 token…');
+    try {
+      const info = await window.GHSync.test();
+      say(`✓ 连接成功：${info.full_name}（${info.private ? '私有' : '公开'}）。可以上传/拉取了。`);
+      toast('GitHub 令牌已保存并验证');
+    } catch (err) {
+      say('⚠ ' + err.message);
+      toast('token 已保存，但验证失败，看下方提示');
+    }
+  });
+
+  byId('ghUpload')?.addEventListener('click', async () => {
+    if (!window.GHSync) { say('同步脚本没加载，刷新页面'); return; }
+    say('正在上传…');
+    try {
+      // 先拉一次拿 sha，避免冲突
+      let sha = null;
+      try { const cur = await window.GHSync.pull(); sha = cur.sha; } catch (e) { /* 文件可能不存在，直接新建 */ }
+      const data = {};
+      window.GHSync.FIELDS.forEach((k) => { data[k] = store[k]; });
+      data.updatedAt = new Date().toISOString();
+      await window.GHSync.push(data, sha);
+      say('✓ 已上传到 GitHub（' + new Date().toLocaleString('zh-CN') + '）');
+      toast('数据已存到 GitHub 私有仓库');
+    } catch (err) {
+      say('上传失败：' + err.message);
+    }
+  });
+
+  byId('ghDownload')?.addEventListener('click', async () => {
+    if (!window.GHSync) { say('同步脚本没加载，刷新页面'); return; }
+    say('正在拉取…');
+    try {
+      const { data } = await window.GHSync.pull();
+      window.GHSync.FIELDS.forEach((k) => { if (data[k] !== undefined) store[k] = data[k]; });
+      persist();
+      // 重画所有受影响的界面
+      renderHistory(); renderTasks(); renderMemory();
+      byId('themeValue').textContent = store.theme;
+      refreshQfUI();
+      say('✓ 已拉取并覆盖本机数据（' + (data.updatedAt ? new Date(data.updatedAt).toLocaleString('zh-CN') : '未知时间') + '）');
+      toast('数据已从 GitHub 同步');
+    } catch (err) {
+      say('拉取失败：' + err.message);
+    }
+  });
+
+  refreshSyncUI();
+}
 
 /* ---------- 环境自适应 ---------- */
 // 云端域名能校验 Origin 调真模型；GitHub Pages 等静态域名只能跑本地能力。
@@ -1116,7 +1276,7 @@ function isCloudHost() {
 }
 function showEnvBanner() {
   const banner = byId('envBanner');
-  banner.innerHTML = `<span>这里是静态版：工具、多声音朗读、画图本地可用；小智的真 AI 对话请用<a href="https://${CLOUD_HOST}/?sharecode=SCNBGIMJ67" target="_blank" rel="noopener">云端版</a>。</span><button data-action="dismiss-banner" aria-label="关闭"><svg class="icon"><use href="#i-close"/></svg></button>`;
+  banner.innerHTML = `<span>数据只存本机。要让 AI 真对话：去「设置 → 千帆 AI」填 key（免费模型即可），静态版也能用。</span><button data-action="dismiss-banner" aria-label="关闭"><svg class="icon"><use href="#i-close"/></svg></button>`;
   banner.hidden = false;
   banner.querySelector('[data-action="dismiss-banner"]').onclick = () => { banner.hidden = true; };
 }
@@ -1178,6 +1338,8 @@ function boot() {
   renderTasks();
   renderHistory();
   renderCreateTabs();
+  initQianfanUI();
+  initSyncUI();
   // 手机和 Chrome 首次 getVoices 常为空，等系统把声音列表加载好再重画
   if (window.speechSynthesis) {
     window.speechSynthesis.getVoices();
@@ -1187,13 +1349,22 @@ function boot() {
     byId('modelCurrent').textContent = '正在准备云端…';
     // SDK 异步加载：就绪后再初始化云端，界面与所有按钮不受 CDN 加载影响
     if (typeof window.whenSdk === 'function') {
-      window.whenSdk(() => initCloud());
+      window.whenSdk(() => {
+        initCloud();
+        // 云端 SDK 即便没就绪，千帆 key 也要进模型列表
+        if (!state.cloudReady && window.QIANFAN?.getKey?.()) loadModels();
+      });
     } else {
       initCloud();
     }
   } else {
     showEnvBanner();
-    byId('modelCurrent').textContent = '静态版不加载云端模型。工具与朗读可正常使用，真 AI 请用云端版。';
+    // 静态版：有千帆 key 就加载千帆模型，真 AI 照样能用
+    if (window.QIANFAN?.getKey?.()) {
+      loadModels();
+    } else {
+      byId('modelCurrent').textContent = '去「设置 → 千帆 AI」填 key，静态版也能用真 AI。';
+    }
   }
 }
 
