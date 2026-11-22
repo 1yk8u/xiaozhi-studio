@@ -662,9 +662,27 @@ function readLast() {
   speak(last.innerText);
 }
 
-function voiceLabel(v) {
-  // 系统给的名字常带一堆括号与连字符，这里只做轻微清理，保留真实身份
-  return (v.name || v.voiceURI || '未命名').replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+// 系统声音名大多是英文，这里映射成中文，保证设置页不出现英文
+const VOICE_CN_MAP = [
+  [/xiaoxiao/i, '晓晓'], [/huihui/i, '慧慧'], [/yaoyao/i, '遥遥'],
+  [/kangkang/i, '康康'], [/yunxi/i, '云希'], [/yunyang/i, '云扬'],
+  [/xiaoshuang/i, '小双'], [/hanyu/i, '涵宇'], [/xiaoyi/i, '晓伊'],
+  [/xiaomo/i, '晓墨'], [/xiaoxuan/i, '晓萱'], [/lili/i, '莉莉'],
+  [/tingting/i, '婷婷'], [/sinji/i, '信杰'], [/meijia/i, '美佳'],
+  [/yating/i, '雅婷'], [/zhiyu/i, '知雨'], [/zira/i, '吉拉'],
+  [/david/i, '大卫'], [/mark/i, '马克'], [/aria/i, '阿莉娅'],
+  [/jenny/i, '珍妮'], [/guy/i, '盖伊'], [/ana/i, '安娜'],
+  [/bill/i, '比尔'], [/samantha/i, '萨曼塔'], [/karen/i, '凯伦'],
+  [/google/i, '谷歌'],
+];
+function voiceLabel(v, idx) {
+  const raw = String(v.name || v.voiceURI || '');
+  let cn = '';
+  for (const [re, name] of VOICE_CN_MAP) { if (re.test(raw)) { cn = name; break; } }
+  const lang = langLabel(v.lang);
+  const natural = /natural|neural/i.test(raw) ? '自然音色' : '';
+  const base = cn || ((lang && lang !== '其他' ? lang : '') + '声音' + (idx ? ' ' + idx : ''));
+  return [base, natural].filter(Boolean).join(' · ');
 }
 // 把 en-US / zh-CN 这类语言代码显示成中文
 function langLabel(lang) {
@@ -712,27 +730,32 @@ function renderVoices() {
       title.className = 'voice-group-title';
       title.textContent = `${g} · ${groups[g].length}`;
       box.appendChild(title);
-      groups[g].forEach((v) => {
+      groups[g].forEach((v, vi) => {
+        const label = voiceLabel(v, vi + 1);
         const row = document.createElement('div');
         const active = sel && (sel.voiceURI === v.voiceURI || sel.name === v.name);
         row.className = 'voice-row' + (active ? ' selected' : '');
         const tag = (v.localService ? '本地' : '在线') + ' · ' + langLabel(v.lang);
         row.innerHTML = `<button class="voice-pick" type="button">
             <span class="voice-dot"><svg class="icon"><use href="#i-volume"/></svg></span>
-            <span class="voice-name">${esc(voiceLabel(v))}</span>
+            <span class="voice-name">${esc(label)}</span>
             <span class="voice-tag">${esc(tag)}</span>
             <svg class="icon check"><use href="#i-check"/></svg>
           </button>
-          <button class="voice-del" type="button" title="删掉这个声音" aria-label="删掉 ${esc(voiceLabel(v))}">×</button>`;
+          <button class="voice-del" type="button" title="删掉这个声音" aria-label="删掉 ${esc(label)}">×</button>`;
         // 点选：只改选中态和试听，不重建整个列表（重建会打断朗读、就是"重新来"的毛病）
         row.querySelector('.voice-pick').onclick = () => {
           store.voice = v.voiceURI; persist();
           box.querySelectorAll('.voice-row').forEach((r) => r.classList.remove('selected'));
           row.classList.add('selected');
-          byId('voiceValue').textContent = voiceLabel(v);
+          byId('voiceValue').textContent = label;
           stopSpeech();
+          // 切换声音后立刻用新声音试听，并清掉朗读队列的「已念到」指针，
+          // 这样接下来对话里的字会从头用新声音念，不会再出现切换后不朗读。
+          speechQ.spokenTo = 0;
           const u = new SpeechSynthesisUtterance('你好，这是你选的朗读声音。');
           try { u.voice = v; } catch (e) {} u.lang = v.lang || 'zh-CN'; u.rate = store.speechRate ?? 1;
+          u.onend = () => { try { window.speechSynthesis.resume(); } catch (e) {} };
           laterSpeak(() => {
             try { window.speechSynthesis.resume(); } catch (e) {}
             window.speechSynthesis.speak(u);
