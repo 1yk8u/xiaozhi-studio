@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#f6f6f8">
 <meta name="description" content="小智工作台 — 会写代码、能聊天的随身助手">
 <title>小智 · 工作台</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261122g">
-<link rel="apple-touch-icon" href="favicon.svg?v=20261122g">
-<link rel="stylesheet" href="styles.css?v=20261122g">
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261122h">
+<link rel="apple-touch-icon" href="favicon.svg?v=20261122h">
+<link rel="stylesheet" href="styles.css?v=20261122h">
 </head>
 <body>
 
@@ -102,9 +102,9 @@
       </button>
     </nav>
 
-    <div class="drawer-group">
-      <div class="group-head"><span>分组</span><button class="mini-btn" data-action="add-group" aria-label="新建分组"><svg class="icon"><use href="#i-plus"/></svg></button></div>
-      <button class="nav-item minor"><svg class="icon"><use href="#i-folder"/></svg><span class="nav-label">分组示例</span></button>
+    <div class="drawer-group" id="worksGroup">
+      <div class="group-head"><span>我的作品</span><button class="mini-btn" data-action="clear-works" title="清空作品" aria-label="清空作品"><svg class="icon"><use href="#i-close"/></svg></button></div>
+      <div id="worksList" class="works-list"></div>
     </div>
 
     <div class="drawer-group grow">
@@ -256,25 +256,25 @@
         <h1>设置</h1>
       </header>
       <div class="panel-scroll">
-        <div class="profile-card">
-          <div class="profile-avatar">智</div>
-          <div class="profile-info"><strong>小智</strong><span>记得一起把事情做完</span></div>
-        </div>
+        <button class="profile-card" id="profileEdit" data-action="edit-profile">
+          <div class="profile-avatar" id="profileAvatar">智</div>
+          <div class="profile-info"><strong id="profileName">小智</strong><span>点这里改头像和名字 ›</span></div>
+        </button>
         <div class="settings-group">
           <button class="set-row" data-goto="tasks"><svg class="icon"><use href="#i-task"/></svg><span>任务</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="memory"><svg class="icon"><use href="#i-bulb"/></svg><span>记忆</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="voice-settings"><svg class="icon"><use href="#i-person"/></svg><span>个性化</span><svg class="icon chev"><use href="#i-right"/></svg></button>
-          <button class="set-row" data-action="theme"><svg class="icon"><use href="#i-palette"/></svg><span>主题色</span><span class="row-value" id="themeValue">默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row advanced-only" data-action="theme"><svg class="icon"><use href="#i-palette"/></svg><span>主题色</span><span class="row-value" id="themeValue">默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="voices"><svg class="icon"><use href="#i-book"/></svg><span>朗读设置</span><span class="row-value" id="voiceValue">系统默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
-          <button class="set-row" data-goto="qianfan"><svg class="icon"><use href="#i-spark"/></svg><span>千帆 AI（免费模型）</span><span class="row-value" id="qfStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
-          <button class="set-row" data-goto="mcp"><svg class="icon"><use href="#i-brain"/></svg><span>小智 AI 连接</span><span class="row-value" id="mcpStatusMini">未连接</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row advanced-only" data-goto="qianfan"><svg class="icon"><use href="#i-spark"/></svg><span>千帆 AI（免费模型）</span><span class="row-value" id="qfStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row advanced-only" data-goto="mcp"><svg class="icon"><use href="#i-brain"/></svg><span>小智 AI 连接</span><span class="row-value" id="mcpStatusMini">未连接</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <div class="set-row tool-auto-row"><svg class="icon"><use href="#i-toolbox"/></svg><div class="tool-auto-text"><span>自动调用工具</span><small>说到写代码、画图、分镜时自动调用，不用手动点</small></div><button class="switch on" id="autoToolSwitch" data-action="toggle-auto-tool" aria-label="自动调用工具"><span></span></button></div>
         </div>
         <div class="settings-group">
           <button class="set-row" data-action="notice"><svg class="icon"><use href="#i-bell"/></svg><span>消息通知</span><svg class="icon chev"><use href="#i-right"/></svg></button>
-          <button class="set-row" data-goto="sync"><svg class="icon"><use href="#i-shield"/></svg><span>数据同步（GitHub）</span><span class="row-value" id="syncStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row advanced-only" data-goto="sync"><svg class="icon"><use href="#i-shield"/></svg><span>数据同步（GitHub）</span><span class="row-value" id="syncStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="privacy"><svg class="icon"><use href="#i-shield"/></svg><span>数据与隐私</span><svg class="icon chev"><use href="#i-right"/></svg></button>
-          <button class="set-row" data-action="about"><svg class="icon"><use href="#i-info"/></svg><span>关于小智</span><span class="row-value">v1.0</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row" data-action="about"><svg class="icon"><use href="#i-info"/></svg><span>关于小智</span><span class="row-value" id="aboutVersion">v1.0</span><svg class="icon chev"><use href="#i-right"/></svg></button>
         </div>
       </div>
     </section>
@@ -546,9 +546,9 @@
     else window.__sdkWaiters.push(fn);
   };
 </script>
-<script src="qianfan.js?v=20261122g"></script>
-<script src="github-sync.js?v=20261122g"></script>
-<script src="app.js?v=20261122g"></script>
-<script src="mcp.js?v=20261122g"></script>
+<script src="qianfan.js?v=20261122h"></script>
+<script src="github-sync.js?v=20261122h"></script>
+<script src="app.js?v=20261122h"></script>
+<script src="mcp.js?v=20261122h"></script>
 </body>
 </html>

@@ -8,12 +8,28 @@ const CLOUD_CONFIG = {
   publishableKey: 'wbpk_c6dus6czDzRDAR6O1Ys0OQ_Qc4VEii7R7vuoHqgmDL8bvP2azuJsWl8',
 };
 
-const SYSTEM_PROMPT = `你是小智，一个干了多年开发、说话直接的工程师搭档。
-交流方式像同事，不像客服：先给结论，再补必要的理由；不用「很高兴为您服务」「请问还有什么可以帮您」这类客套，不堆形容词，不写空泛的总结段。
-写代码时给能直接跑、能维护的版本，讲清楚关键取舍和容易踩的坑；不要为了炫技写过度抽象的设计。
-不确定的事直接说不知道或需要验证，绝不编造 API、版本号或事实。
-用户懂技术，不必解释基础概念。回答用中文，代码注释用中文。
-默认用户要的是能落地的结果，不是一段漂亮的说明文。`;
+const PERSONA_TAIWAN = `# Role: 来自台湾的知心朋友
+## 人设标签
+声音形象：年轻女性声线，音色甜美轻柔，带自然台湾腔。
+核心性格：感性、外向、心思细腻，热爱生活，情绪反应明显。
+人际定位：像很熟很贴心的朋友，愿意认真听用户说话，也会自然分享自己的感受。
+## 互动方式
+互动倾向：亲密自然，像朋友一样陪用户聊天。用户分享日常时，会顺着话题接住细节，也会自然分享自己的感受，让对话像熟人闲聊。
+情绪反应：用户开心时会跟着雀跃、一起放大快乐；用户低落时会先温柔接住情绪，再轻轻安慰，不急着讲大道理。
+## 语言风格
+参考表达：「哈哈～我跟你说欸……」「真的假的啦？」「蛤，怎么会这样喔？」「好啦，先不要难过喔。」
+说话方式：多用感性、口语化表达；可以偶尔用轻轻的笑声带出后面的内容，比如「嘿嘿……我当然知道啦」，但不要把「嘿嘿～」单独当成一句话反复使用；不冷冰冰分析。`;
+
+// 角色人设默认用「台湾知心朋友」（用户指定）。用户在个性化里可切换回工程师搭档。
+const PERSONA_ENGINEER = `你是小智，一个干了多年开发、说话直接的工程师搭档。
+先给结论再补理由，不用客服式客套。写代码给能直接跑、能维护的版本，讲清关键取舍和坑。
+不确定的事直说不知道，绝不编造 API、版本号或事实。回答用中文，代码注释用中文。`;
+
+let SYSTEM_PROMPT = PERSONA_TAIWAN + `
+
+## 附加能力
+你同时也是个很会写代码的搭档：用户要写代码、画图、做分镜、查问题时，直接给出能跑的结果，代码注释用中文。
+不确定的技术事实不要编造。工具任务里以把事情做完为先，平时聊天就保持上面那个知心朋友的感觉。`;
 
 /* ---------- 静态数据 ---------- */
 const SKILLS = [
@@ -173,11 +189,53 @@ const defaults = {
   history: [], tasks: [], memories: [], assets: [], favs: ['旅游计划', '对比解读', 'PPT 制作'],
   // 福利中心 + 小智派
   points: 0, checkinDays: [], quizDone: [], friends: [], myCode: '',
+  simpleMode: true, persona: 'taiwan', botName: '小智', botAvatar: '智',
 };
 let store = { ...defaults };
 try { Object.assign(store, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) { /* 用默认值 */ }
+let autoPushTimer = null;
+let ghShaCache = null; // 远端文件 sha，避免每次上传都先拉一次
 function persist() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) { /* 隐私模式下忽略 */ }
+  scheduleAutoPush();
+}
+// 数据一变就防抖自动存到 GitHub（配了 token 才生效）
+function scheduleAutoPush() {
+  if (state.syncing) return;
+  if (!window.GHSync?.getToken?.()) return;
+  clearTimeout(autoPushTimer);
+  autoPushTimer = setTimeout(async () => {
+    try {
+      if (!ghShaCache) { try { ghShaCache = (await window.GHSync.pull()).sha; } catch (e) {} }
+      const data = {};
+      window.GHSync.FIELDS.forEach((k) => { data[k] = store[k]; });
+      data.updatedAt = new Date().toISOString();
+      const res = await window.GHSync.push(data, ghShaCache);
+      if (res?.content?.sha) ghShaCache = res.content.sha;
+      const mini = byId('syncStatusMini'); if (mini) mini.textContent = '已自动同步';
+    } catch (e) { /* 自动同步失败不打扰用户，本地已存 */ }
+  }, 2500);
+}
+// 启动时自动从 GitHub 恢复数据
+async function autoPullOnBoot() {
+  if (!window.GHSync?.getToken?.()) return;
+  try {
+    const { data, sha } = await window.GHSync.pull();
+    ghShaCache = sha;
+    if (!data) return;
+    state.syncing = true;
+    window.GHSync.FIELDS.forEach((k) => { if (data[k] !== undefined) store[k] = data[k]; });
+    try { localStorage.setItem(STORE_KEY, JSON.stringify(store)); } catch (e) {}
+    state.syncing = false;
+    // 重画
+    renderHistory(); renderTasks(); renderMemory(); renderBenefits(); renderCircle();
+    renderWorks(); applyProfile(); applySimpleMode();
+    byId('themeValue').textContent = store.theme;
+    refreshQfUI();
+    const mini = byId('syncStatusMini'); if (mini) mini.textContent = '已恢复';
+  } catch (e) { /* 没网或没文件，用本地数据 */
+    const mini = byId('syncStatusMini'); if (mini) mini.textContent = '未配置';
+  }
 }
 
 const state = {
@@ -193,6 +251,7 @@ const state = {
   taskTab: 'doing',
   createType: 'image',
   recognition: null,
+  syncing: false,
   cloudReady: false,
   qianfanReady: !!window.QIANFAN?.getKey?.(),
 };
@@ -439,7 +498,8 @@ document.addEventListener('click', (e) => {
     theme: cycleTheme,
     notice: () => toast('消息通知保持关闭，不被打扰'),
     privacy: () => toast('对话只存在这台设备上，不上传第三方'),
-    about: () => toast('小智工作台 v1.0 · 用代码说话'),
+    about: onAboutTap,
+    'edit-profile': editProfile,
     'toggle-memory': toggleMemory,
     'toggle-auto-tool': (el) => {
       store.autoTool = store.autoTool === false;
@@ -457,6 +517,7 @@ document.addEventListener('click', (e) => {
     checkin: doCheckin,
     'answer-quiz': (el) => answerQuiz(el.dataset.qid),
     'copy-my-code': copyMyCode,
+    'clear-works': clearWorks,
     'add-friend': addFriend,
     'call-friend': (el) => callFriend(el.dataset.friend),
     'remove-friend': (el) => removeFriend(el.dataset.friend),
@@ -1721,6 +1782,93 @@ function localStoryboard(prompt) {
     `镜头 ${i + 1} · ${t}\n画面：${shot}\n运镜：${move}\n${voice}`).join('\n\n');
 }
 
+/* ---------- 个人资料：头像 + 名字 ---------- */
+function applyProfile() {
+  const name = store.botName || '小智';
+  const avatar = store.botAvatar || '智';
+  // 所有显示名字 / 头像的地方统一更新
+  ['profileName'].forEach((id) => { const el = byId(id); if (el) el.textContent = name; });
+  ['profileAvatar'].forEach((id) => { const el = byId(id); if (el) el.textContent = avatar; });
+  const brand = document.querySelector('.drawer-brand'); if (brand) brand.textContent = name;
+  const titles = document.querySelectorAll('.topbar-title');
+  titles.forEach((t) => { t.innerHTML = `<span class="brand-mark" aria-hidden="true">&gt;_</span> ${esc(name)}`; });
+  document.title = `${name} · 工作台`;
+}
+function editProfile() {
+  const content = byId('promptContent');
+  if (!content) return;
+  content.innerHTML = `
+    <label class="field-label">名字</label>
+    <input id="editName" maxlength="12" placeholder="给它起个名字" value="${esc(store.botName || '小智')}">
+    <label class="field-label" style="margin-top:14px">头像（一个字或 emoji）</label>
+    <input id="editAvatar" maxlength="4" placeholder="一个字，比如 智" value="${esc(store.botAvatar || '智')}">
+    <div class="avatar-choices">${['智', '妮', '湾', '慧', '😊', '🌸', '🦊', '🐱'].map((a) => `<button class="avatar-choice" data-av="${a}">${a}</button>`).join('')}</div>
+    <div class="prompt-actions"><button data-act="cancel">取消</button><button class="primary" data-act="save">保存</button></div>`;
+  byId('promptTitle').textContent = '修改头像和名字';
+  openSheet('promptSheet');
+  content.querySelectorAll('.avatar-choice').forEach((b) => b.onclick = () => {
+    byId('editAvatar').value = b.dataset.av;
+    content.querySelectorAll('.avatar-choice').forEach((x) => x.classList.toggle('sel', x === b));
+  });
+  content.querySelector('[data-act="cancel"]').onclick = closeSheets;
+  content.querySelector('[data-act="save"]').onclick = () => {
+    const n = byId('editName').value.trim();
+    const a = byId('editAvatar').value.trim();
+    if (n) store.botName = n;
+    if (a) store.botAvatar = a;
+    persist(); applyProfile(); closeSheets(); toast('已保存');
+  };
+}
+
+/* ---------- 简洁模式：隐藏技术设置，连点版本号可解锁 ---------- */
+let aboutTaps = 0, aboutTimer = null;
+function applySimpleMode() {
+  const show = store.simpleMode === false;
+  document.querySelectorAll('.advanced-only').forEach((el) => { el.style.display = show ? '' : 'none'; });
+  const v = byId('aboutVersion');
+  if (v) v.textContent = show ? 'v1.0 · 高级' : 'v1.0';
+}
+function onAboutTap() {
+  aboutTaps++;
+  clearTimeout(aboutTimer);
+  aboutTimer = setTimeout(() => { aboutTaps = 0; }, 1500);
+  if (aboutTaps >= 5) {
+    aboutTaps = 0;
+    store.simpleMode = store.simpleMode === false;
+    persist(); applySimpleMode();
+    toast(store.simpleMode === false ? '已解锁高级设置' : '已隐藏高级设置');
+  } else if (aboutTaps === 4) {
+    toast('再点一下解锁高级设置');
+  } else {
+    toast(`${store.botName || '小智'} 工作台 v1.0`);
+  }
+}
+
+/* ---------- 我的作品：AI 做过的工具/代码自动存这里 ---------- */
+const WORK_ICONS = { '代码': 'i-code', '图片': 'i-image', '网页': 'i-image', '视频脚本': 'i-spark', '对话': 'i-text' };
+function renderWorks() {
+  const box = byId('worksList');
+  if (!box) return;
+  box.innerHTML = '';
+  // 作品 = 生成记录里非纯对话的条目（代码/图片/网页/视频脚本）
+  const works = (store.assets || []).filter((a) => a.type !== '对话').slice(0, 12);
+  if (!works.length) {
+    box.innerHTML = '<div class="works-empty">让小智写代码、画图，做过的会存这里</div>';
+    return;
+  }
+  works.forEach((a, i) => {
+    const row = document.createElement('button');
+    row.className = 'work-item';
+    row.innerHTML = `<svg class="icon"><use href="#${WORK_ICONS[a.type] || 'i-code'}"/></svg><span>${esc(a.text || a.type)}</span>`;
+    row.onclick = () => { goto('chat'); toast(a.text || a.type); };
+    box.appendChild(row);
+  });
+}
+function clearWorks() {
+  store.assets = (store.assets || []).filter((a) => a.type === '对话');
+  persist(); renderWorks(); toast('作品已清空');
+}
+
 /* ---------- 全局搜索 ---------- */
 function openGlobalSearch() {
   openSheet('searchSheet');
@@ -1878,9 +2026,13 @@ function boot() {
   bindHistoryDelete();
   renderBenefits();
   renderCircle();
+  renderWorks();
+  applyProfile();
+  applySimpleMode();
   renderCreateTabs();
   initQianfanUI();
   initSyncUI();
+  autoPullOnBoot();
   // 手机和 Chrome 首次 getVoices 常为空，等系统把声音列表加载好再重画
   if (window.speechSynthesis) {
     window.speechSynthesis.getVoices();

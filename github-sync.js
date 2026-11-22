@@ -9,7 +9,9 @@
   var API = 'https://api.github.com';
   var DEFAULT_REPO = '1yk8u/xiaozhi-studio-data';
   var FILE = 'data.json';
-  var FIELDS = ['history', 'tasks', 'memories', 'favs', 'voice', 'speechRate', 'theme', 'memoryOn'];
+  var FIELDS = ['history', 'tasks', 'memories', 'favs', 'voice', 'speechRate', 'theme', 'memoryOn',
+    'autoRead', 'autoTool', 'hiddenVoices', 'asrLang', 'points', 'checkinDays', 'quizDone', 'friends',
+    'myCode', 'simpleMode', 'persona', 'botName', 'botAvatar', 'speechPitch'];
 
   function getToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
   function setToken(v) { try { localStorage.setItem(TOKEN_KEY, (v || '').trim()); } catch (e) {} }

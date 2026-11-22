@@ -600,3 +600,15 @@ h1, h2, h3, h4, p { margin: 0; }
 @keyframes tp-rotate { to { transform: rotate(360deg); } }
 .tp-text { flex: 1; font-size: 12.5px; color: var(--brand, #078f47); font-weight: 600; }
 .tp-step { font-size: 11px; color: var(--brand, #078f47); opacity: .8; font-variant-numeric: tabular-nums; }
+
+/* ---------- 我的作品 / 个人资料 / 简洁模式 ---------- */
+.works-list { display: flex; flex-direction: column; gap: 1px; }
+.works-empty { font-size: 12px; color: var(--ink-3); padding: 6px 12px; line-height: 1.5; }
+.work-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; border-radius: 9px; text-align: left; color: var(--ink-2); }
+.work-item:hover { background: rgba(0,0,0,.035); }
+.work-item .icon { width: 16px; height: 16px; color: var(--brand, #07b857); flex: none; }
+.work-item span { flex: 1; min-width: 0; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.profile-card { width: 100%; text-align: left; cursor: pointer; }
+.avatar-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.avatar-choice { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line, #e5e5ea); background: #fafafa; font-size: 18px; }
+.avatar-choice.sel { border-color: var(--brand, #07b857); background: var(--brand-soft, #e8f8ee); }
