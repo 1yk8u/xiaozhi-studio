@@ -21,7 +21,7 @@
   // 网页暴露给小智 AI 的工具。description 写清楚，小智才知道何时调用。
   const TOOLS = [
     {
-      name: 'write_code',
+      name: 'write_code', cn: '写代码',
       description: '编写或修改代码。当用户要求写代码、做功能、实现程序、脚本、网页、修复 bug 时调用。返回完整可运行的代码。',
       inputSchema: {
         type: 'object',
@@ -33,7 +33,7 @@
       },
     },
     {
-      name: 'generate_image',
+      name: 'generate_image', cn: '生成图片',
       description: '根据文字描述生成 SVG 图片。当用户要求画图、生成图片、插画、配图时调用。返回 SVG 代码。',
       inputSchema: {
         type: 'object',
@@ -44,7 +44,7 @@
       },
     },
     {
-      name: 'make_storyboard',
+      name: 'make_storyboard', cn: '生成分镜',
       description: '生成短视频分镜脚本。当用户要求写视频脚本、分镜、拍摄方案时调用。',
       inputSchema: {
         type: 'object',
@@ -55,11 +55,16 @@
       },
     },
     {
-      name: 'get_time',
+      name: 'get_time', cn: '当前时间',
       description: '获取当前的日期和时间。当用户问现在几点、今天日期时调用。',
       inputSchema: { type: 'object', properties: {} },
     },
   ];
+  // 工具显示名：界面只显示中文，英文代号只用于和小智通信
+  function toolCN(name) {
+    const t = TOOLS.find((x) => x.name === name);
+    return t ? t.cn : name;
+  }
 
   function token() {
     return (localStorage.getItem(TOKEN_KEY) || '').trim();
@@ -107,7 +112,7 @@
     const name = params?.name;
     const args = params?.arguments || {};
     callCount++;
-    log(`小智调用工具：${name}`, 'call');
+    log(`小智调用工具：${toolCN(name)}`, 'call');
 
     try {
       let text = '';
@@ -153,16 +158,16 @@
           text = `已收到视频脚本需求：${topic}。`;
         }
       } else {
-        text = '未知工具：' + name;
+        text = '没有这个工具：' + toolCN(name);
       }
 
       sendResult(id, { content: [{ type: 'text', text: text }], isError: false });
-      log(`工具 ${name} 已返回结果（${text.length} 字）`, 'ok');
+      log(`「${toolCN(name)}」已返回结果（${text.length} 字）`, 'ok');
       bumpToolCount();
     } catch (err) {
       const msg = err?.message || String(err);
       sendResult(id, { content: [{ type: 'text', text: '工具执行失败：' + msg }], isError: true });
-      log(`工具 ${name} 失败：${msg}`, 'err');
+      log(`「${toolCN(name)}」失败：${msg}`, 'err');
     }
   }
 
@@ -233,10 +238,10 @@
     clearTimeout(handshakeTimer);
     handshakeTimer = setTimeout(() => {
       if (!connected) {
-        setStatus('连接超时：token 可能无效', 'err');
-        log('握手超时：token 可能无效或端点不可用，停止自动重连', 'err');
+        setStatus('连不上小智，点「连接」重试', 'wait');
+        log('小智没有回应，已停止尝试。请确认 token 正确、小智服务可用后再点「连接」。', 'err');
         try { ws?.close(); } catch (e) {}
-        localStorage.setItem(AUTO_KEY, '0'); // 停止重连，避免刷屏
+        localStorage.setItem(AUTO_KEY, '0');
         updateButtons();
       }
     }, 12000);
@@ -263,34 +268,22 @@
       // 握手已成功过才叫"已连接"，否则是"连接失败"
       if (!opened) {
         failedAttempts++;
-        // 1006 是浏览器端"连接被中途掐断"，把最可能的原因说清楚
-        if (ev.code === 1006) {
-          setStatus('连接被断开（1006）', 'err');
-          log('连接被服务器断开：常见原因是 token 已在别处使用、或网络不稳定。', 'err');
-          log('连续失败 ' + failedAttempts + ' 次', 'err');
-        } else if (ev.code === 1008 || ev.code === 4401 || ev.code === 4403) {
-          setStatus('token 被拒绝（' + ev.code + '）', 'err');
-          log('服务器拒绝了这个 token，请去小智平台重新复制 token 再填。', 'err');
+        if (ev.code === 1008 || ev.code === 4401 || ev.code === 4403) {
+          setStatus('token 没通过，请重新粘贴', 'err');
+          log('这个 token 小智不认，请去小智平台重新复制一个再填。', 'err');
         } else {
-          setStatus('连接失败（' + (ev.code || '无响应') + '）', 'err');
-          log('连接失败，code=' + (ev.code || '-') + '，连续失败 ' + failedAttempts + ' 次', 'err');
+          // 1006 等一切"没连上"的情况统一说人话，不显示技术码、不刷屏
+          setStatus('暂时连不上，点「连接」重试', 'wait');
+          log('这次没连上。可能 token 已在别处使用，或小智服务器暂时不可用。', 'err');
+          log('已经停下，不再反复重试。检查 token 后再点「连接」即可。');
         }
       } else {
         setStatus('已断开', '');
-        log('连接已关闭（code ' + (ev.code || '-') + '）');
+        log('连接已关闭');
       }
-      // 失败 3 次就停，避免无限重连刷屏
-      if (failedAttempts >= 3) {
-        log('连续失败 3 次，停止自动重连。请检查 token 后手动点连接。', 'err');
-        localStorage.setItem(AUTO_KEY, '0');
-        return;
-      }
-      if (localStorage.getItem(AUTO_KEY) !== '0' && token()) {
-        log(`${reconnectDelay / 1000} 秒后重连…`);
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-      }
+      // 连接失败一律停下，不自动重连——避免红色报错反复刷屏
+      clearTimeout(reconnectTimer);
+      localStorage.setItem(AUTO_KEY, '0');
     };
   }
 
@@ -342,11 +335,12 @@
         const v = (input.value || '').trim();
         if (!v) { if (window.XZ?.toast) window.XZ.toast('先填入 token'); return; }
         localStorage.setItem(TOKEN_KEY, v);
-        localStorage.setItem(AUTO_KEY, '1');
+        localStorage.setItem(AUTO_KEY, '0'); // 只保存，不自动连，避免一进页面就报错刷屏
         input.value = v;
         updateButtons();
+        setStatus('已保存，点「连接」开始', '');
         if (window.XZ?.toast) window.XZ.toast('token 已存到本机浏览器，不会上传');
-        log('token 已保存到本机');
+        log('token 已保存到本机。要点「连接」才会尝试连小智。');
       });
     }
     if (conn) conn.addEventListener('click', () => {
@@ -369,15 +363,12 @@
     const box = document.getElementById('mcpTools');
     if (box) {
       box.innerHTML = TOOLS.map((t) =>
-        `<div class="mcp-tool"><strong>${t.name}</strong><span>${t.description.split('。')[0]}</span></div>`
+        `<div class="mcp-tool"><strong>${t.cn || t.name}</strong><span>${t.description.split('。')[0]}</span></div>`
       ).join('');
     }
-    // 有 token 且上次允许自动连接则自动连
-    if (token() && localStorage.getItem(AUTO_KEY) !== '0') {
-      setTimeout(connect, 600);
-    } else {
-      setStatus('未连接', '');
-    }
+    // 不再进页面自动连接：保存 token、手动点「连接」才会尝试，避免一进来就红色报错
+    setStatus('未连接，点「连接」开始', '');
+    log('已就绪。填入 token 并点「连接」，小智就能进来调用工具。');
   }
 
   if (document.readyState === 'loading') {
