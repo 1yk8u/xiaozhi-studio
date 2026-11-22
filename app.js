@@ -37,6 +37,18 @@ const SKILLS = [
   { name: '腾讯文档', desc: '创建、编辑和整理在线文档', emoji: '📄', bg: '#e8f1ff', prompt: '帮我起草一份文档，说明结构和每部分要写什么。' },
   { name: '携程', desc: '查询机票火车票酒店和景点', emoji: '🧳', bg: '#e6f4ff', prompt: '帮我列出一次出行需要查的票务和住宿信息，以及查询顺序。' },
   { name: '航班管家', desc: '查询预订机票和行程变动', emoji: '✈️', bg: '#eaf0ff', prompt: '帮我整理一段航班行程的关键信息和变动应对方案。' },
+  // 开源社区常见实用技能
+  { name: 'PPT 大纲生成', desc: '把主题变成逐页可编辑大纲', emoji: '📑', bg: '#fff1e0', fav: 1, prompt: '用 Marp 格式帮我做一份 PPT：主题我稍后给你。要求封面、目录、每页标题+要点+演讲备注，语法用 Marp（--- 分隔，<!-- 备注 -->）。先问我主题和页数。' },
+  { name: '思维导图', desc: '把主题拆成树状结构', emoji: '🧠', bg: '#f0eaff', prompt: '把主题整理成思维导图大纲（用缩进表示层级，3-4 层）：先问我主题。' },
+  { name: '简历优化', desc: '按岗位改写经历、突出成果', emoji: '📄', bg: '#e8f1ff', prompt: '我发你简历和目标岗位，帮我按 STAR 法则改写经历、量化成果、突出关键词。' },
+  { name: '代码审查', desc: '逐行挑 bug 和隐患', emoji: '🔎', bg: '#ffefec', prompt: '审查我接下来发的代码：按严重程度列问题、原因、改法，给出修复后的关键片段。' },
+  { name: 'API 文档', desc: '生成接口说明和示例', emoji: '📚', bg: '#eaf7f2', prompt: '帮我写一份接口文档：含路径、方法、参数表、响应示例、错误码。先问我接口功能。' },
+  { name: '正则表达式', desc: '写正则并逐段讲清楚', emoji: '🔤', bg: '#eef2ff', prompt: '写一个正则匹配我要的内容，逐段解释，并给 3 个正例和 3 个反例。先说要匹配什么。' },
+  { name: 'SQL 助手', desc: '写查询、建表和索引建议', emoji: '🗄️', bg: '#fff6e3', prompt: '根据我的需求写 SQL，给出建表语句、查询和需要的索引，并说明优化思路。' },
+  { name: '邮件润色', desc: '写得不卑不亢又清楚', emoji: '✉️', bg: '#e9f4ff', prompt: '帮我改写一封邮件：语气专业不啰嗦，重点前置。内容我稍后发你。' },
+  { name: '翻译校对', desc: '中英互译并润色', emoji: '🌐', bg: '#f3ebff', prompt: '把下面的内容做中英互译，要求地道、忠实原意，并标出容易翻错的地方。' },
+  { name: '周报生成', desc: '把零散工作整理成周报', emoji: '🗓️', bg: '#eaf8e9', prompt: '把我列的零散事项整理成周报：本周完成、进行中、下周计划、风险。内容我稍后发你。' },
+  { name: '批量重命名', desc: '写脚本按规则整理文件', emoji: '🗂️', bg: '#eef2ff', prompt: '写个脚本按我的规则批量重命名文件，要求支持预览（dry-run）、有冲突提示、关键处中文注释。先说规则。' },
 ];
 
 const TOOLS = [
@@ -159,6 +171,8 @@ const defaults = {
   voice: '', speechRate: 1, speechPitch: 1, autoRead: true, autoTool: true, theme: '默认', memoryOn: true,
   hiddenVoices: [], asrLang: '',
   history: [], tasks: [], memories: [], assets: [], favs: ['旅游计划', '对比解读', 'PPT 制作'],
+  // 福利中心 + 小智派
+  points: 0, checkinDays: [], quizDone: [], friends: [], myCode: '',
 };
 let store = { ...defaults };
 try { Object.assign(store, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) { /* 用默认值 */ }
@@ -390,7 +404,15 @@ function goto(view) {
   window.scrollTo(0, 0);
 }
 
-function openDrawer() { byId('drawer').classList.add('open'); byId('drawerScrim').classList.add('show'); }
+// 三杠按钮：桌面端收起/展开左侧栏；手机端滑出抽屉
+function openDrawer() {
+  if (window.innerWidth >= 900) {
+    byId('app').classList.toggle('drawer-collapsed');
+    return;
+  }
+  byId('drawer').classList.add('open');
+  byId('drawerScrim').classList.add('show');
+}
 function closeDrawer() { byId('drawer').classList.remove('open'); byId('drawerScrim').classList.remove('show'); }
 function openSheet(id) { byId(id).classList.add('open'); }
 function closeSheets() { $$('.sheet').forEach((s) => s.classList.remove('open')); }
@@ -431,6 +453,13 @@ document.addEventListener('click', (e) => {
     'sort-skills': () => toast('技能按使用频率排列'),
     'tool-search': () => byId('toolGrid').scrollIntoView(),
     'copy-code': (el) => copyText(el.closest('.msg-code').querySelector('pre').innerText),
+    search: openGlobalSearch,
+    checkin: doCheckin,
+    'answer-quiz': (el) => answerQuiz(el.dataset.qid),
+    'copy-my-code': copyMyCode,
+    'add-friend': addFriend,
+    'call-friend': (el) => callFriend(el.dataset.friend),
+    'remove-friend': (el) => removeFriend(el.dataset.friend),
   };
   if (handlers[action]) handlers[action](e.target.closest('[data-action]'));
 });
@@ -538,12 +567,75 @@ const TOOL_RUNNERS = {
     cn: '生成分镜',
     system: SYSTEM_PROMPT + '\n\n【当前任务：视频分镜工具】用户要视频脚本 / 分镜时，按时间轴列 5-7 个镜头，每个含时长、画面、运镜、旁白，最后给一句整体风格说明。用中文，直接给成品。',
   },
+  review: {
+    cn: '代码审查',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：代码审查工具】按严重程度列出 bug、隐患和改进点，每条给原因和改法，最后给修复后的关键代码。用中文，直接给结果。',
+  },
+  explain: {
+    cn: '代码解释',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：代码解释工具】用工程师的语言讲清这段代码：结构、执行流程、关键细节和容易踩的坑。用中文。',
+  },
+  fix: {
+    cn: 'Bug 修复',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：Bug 修复工具】根据现象定位根因，给出修复后的完整代码和验证方法。用中文，直接给成品。',
+  },
+  refactor: {
+    cn: '重构优化',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：重构工具】重构代码，保持原有行为，逐处说明改动原因，给出完整重构后代码。用中文。',
+  },
+  test: {
+    cn: '写测试用例',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：测试工具】为代码写测试用例，覆盖正常、边界、异常，说明断言理由，给出可运行的测试代码。用中文。',
+  },
+  sql: {
+    cn: 'SQL 生成',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：SQL 工具】根据需求写 SQL，给建表、查询、必要的索引，并说明优化思路。放在代码块里，用中文解释。',
+  },
+  regex: {
+    cn: '正则生成',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：正则工具】写正则，逐段解释，给 3 个正例和 3 个反例，放在代码块里。用中文。',
+  },
+  translate: {
+    cn: '语言转换',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：代码语言转换工具】把代码从一种语言等价改写到另一种，保持行为一致，给完整代码并指出差异。用中文。',
+  },
+  comment: {
+    cn: '添加注释',
+    system: SYSTEM_PROMPT + '\n\n【当前任务：代码注释工具】给代码补注释，只解释「为什么」不逐行翻译，返回带注释的完整代码。用中文。',
+  },
+};
+// 斜杠命令别名：AI 或用户都能用 /工具名 直接触发（"自己执行命令调用工具"）
+const TOOL_ALIASES = {
+  '/code': 'code', '/写码': 'code', '/写代码': 'code',
+  '/img': 'image', '/image': 'image', '/图': 'image', '/画图': 'image',
+  '/story': 'storyboard', '/分镜': 'storyboard',
+  '/review': 'review', '/审查': 'review',
+  '/explain': 'explain', '/解释': 'explain',
+  '/fix': 'fix', '/bug': 'fix', '/修复': 'fix',
+  '/refactor': 'refactor', '/重构': 'refactor',
+  '/test': 'test', '/测试': 'test',
+  '/sql': 'sql', '/regex': 'regex', '/正则': 'regex',
+  '/translate': 'translate', '/转换': 'translate',
+  '/comment': 'comment', '/注释': 'comment',
+  '/tool': 'code', '/run': 'code',
 };
 function detectToolIntent(text) {
-  const t = String(text || '');
+  const t = String(text || '').trim();
+  // 1) 斜杠命令优先：AI 或用户在句首写 /xxx 就明确调用对应工具
+  const first = t.split(/\s+/)[0].toLowerCase();
+  if (TOOL_ALIASES[first]) return TOOL_ALIASES[first];
+  // 2) 自然语言意图
   if (/分镜|镜头脚本|拍摄脚本|视频脚本|短视频|视频分镜/.test(t)) return 'storyboard';
   if (/(画|生成|来|做|整|搞|设计|绘制|弄)[一一张幅个些]?[^。？!！]{0,8}(图|插画|图片|海报|图标|头像|背景)|svg|矢量图|插画|画一张|画一幅/.test(t)) return 'image';
-  if (/(写|生成|实现|开发|做个|做一个|来个|写个|编|修复|改|重构|封装|写一个|帮我写)[^。？!！]{0,12}(代码|程序|脚本|函数|方法|类|网页|页面|网站|app|应用|接口|api|工具|插件|组件|爬虫|小工具)|\b(python|java|javascript|js|html|css|react|vue|android|kotlin|sql|shell|bash|c\+\+|golang|\bgo\b|rust|php|swift)\b/i.test(t) || /有.?bug|报错|这段.?代码|这段代码|重构|修复/.test(t)) return 'code';
+  if (/审查|review|这段代码有没有问题|挑.{0,4}bug|检查这段代码/.test(t)) return 'review';
+  if (/解释|讲解|讲讲|读懂|这段代码在干嘛|什么意思/.test(t)) return 'explain';
+  if (/单元测试|写测试|测试用例|test case/.test(t)) return 'test';
+  if (/重构|优化这段代码|refactor/.test(t)) return 'refactor';
+  if (/改成.{0,6}语言|转换成|翻译成.{0,6}(语言|代码)|python转|js转/.test(t)) return 'translate';
+  if (/加注释|补注释|写注释/.test(t)) return 'comment';
+  if (/\bsql\b|数据库查询|建表|写个查询/.test(t)) return 'sql';
+  if (/正则|regex|匹配规则/.test(t)) return 'regex';
+  if (/(写|生成|实现|开发|做个|做一个|来个|写个|编|修复|改|封装|写一个|帮我写)[^。？!！]{0,12}(代码|程序|脚本|函数|方法|类|网页|页面|网站|app|应用|接口|api|工具|插件|组件|爬虫|小工具)|\b(python|java|javascript|js|html|css|react|vue|android|kotlin|sql|shell|bash|c\+\+|golang|\bgo\b|rust|php|swift)\b/i.test(t) || /有.?bug|报错|这段.?代码|这段代码|重构|修复/.test(t)) return 'code';
   return null;
 }
 
@@ -585,6 +677,7 @@ async function sendMessage(override) {
     badge.className = 'auto-tool-badge';
     badge.innerHTML = `<svg class="icon"><use href="#i-toolbox"/></svg> 已自动调用「${tool.cn}」工具`;
     reply.wrap.querySelector('.msg-body').insertBefore(badge, reply.content);
+    showToolProgress(`调用「${tool.cn}」工具`, 1, 3);
   }
 
   state.busy = true;
@@ -605,11 +698,13 @@ async function sendMessage(override) {
   try {
     thinking.remove();
     for await (const text of streamChat(messages, state.controller.signal)) {
+      if (tool && full === '') showToolProgress(`「${tool.cn}」生成结果中`, 2, 3);
       full += text;
       reply.content.innerHTML = renderText(full);
       scrollToBottom();
       feedSpeechWhileTyping(full); // 文字蹦的同时，把完整句送去朗读
     }
+    if (tool) showToolProgress(`「${tool.cn}」完成`, 3, 3);
     if (!full) {
       reply.content.innerHTML = '<span style="color:var(--ink-3)">这次没有返回内容，点重新生成试试。</span>';
     } else {
@@ -649,6 +744,7 @@ async function sendMessage(override) {
   } finally {
     state.busy = false;
     state.controller = null;
+    hideToolProgress();
     syncSendBtn();
     scrollToBottom();
   }
@@ -1625,6 +1721,147 @@ function localStoryboard(prompt) {
     `镜头 ${i + 1} · ${t}\n画面：${shot}\n运镜：${move}\n${voice}`).join('\n\n');
 }
 
+/* ---------- 全局搜索 ---------- */
+function openGlobalSearch() {
+  openSheet('searchSheet');
+  const input = byId('globalSearch');
+  if (input) { input.value = ''; byId('searchResults').innerHTML = ''; setTimeout(() => input.focus(), 60); }
+}
+byId('globalSearch')?.addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  const box = byId('searchResults');
+  if (!box) return;
+  if (!q) { box.innerHTML = '<p class="search-hint">输入关键词，搜技能、工具、历史对话。</p>'; return; }
+  const hits = [];
+  SKILLS.filter((s) => (s.name + s.desc).toLowerCase().includes(q))
+    .forEach((s) => hits.push({ kind: '技能', title: s.name, desc: s.desc, go: () => { closeSheets(); goto('chat'); setInput(s.prompt); } }));
+  TOOLS.filter((t) => (t.name + t.desc).toLowerCase().includes(q))
+    .forEach((t) => hits.push({ kind: '工具', title: t.name, desc: t.desc, go: () => { closeSheets(); goto('tools'); } }));
+  store.history.filter((h) => (h.title || '').toLowerCase().includes(q))
+    .forEach((h) => hits.push({ kind: '对话', title: h.title || '新对话', desc: h.at || '', go: () => { closeSheets(); const el = byId('historyList')?.querySelector(`[data-hist-id="${h.id}"] .history-title`); if (el) el.click(); } }));
+  if (!hits.length) { box.innerHTML = '<p class="search-hint">没找到相关的，换个词试试。</p>'; return; }
+  box.innerHTML = '';
+  hits.slice(0, 20).forEach((h) => {
+    const row = document.createElement('button');
+    row.className = 'search-hit';
+    row.innerHTML = `<span class="hit-kind">${esc(h.kind)}</span><span class="hit-main"><strong>${esc(h.title)}</strong><small>${esc(h.desc)}</small></span>`;
+    row.onclick = h.go;
+    box.appendChild(row);
+  });
+});
+
+/* ---------- 福利中心：签到 / 答题 ---------- */
+const QUIZZES = [
+  { id: 'q1', q: '下面哪种写法能让中文朗读更自然？', options: ['用系统自带的中文女声', '随便选一个英文男声'], answer: 0 },
+  { id: 'q2', q: '网页里让 AI 自动写代码，靠的是什么？', options: ['意图识别 + 工具指令', '敲三下回车'], answer: 0 },
+  { id: 'q3', q: '小智派加好友要输入什么？', options: ['好友的 6 位配对码', '好友的手机号'], answer: 0 },
+];
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function doCheckin() {
+  store.checkinDays = store.checkinDays || [];
+  if (store.checkinDays.includes(todayStr())) { toast('今天已经签到过啦，明天再来'); return; }
+  store.checkinDays.push(todayStr());
+  const reward = 5000 + Math.min(store.checkinDays.length - 1, 5) * 1000; // 5000/6000/…
+  store.points = (store.points || 0) + reward;
+  persist();
+  renderBenefits();
+  toast(`签到成功，+${reward.toLocaleString()} 小智豆`);
+}
+function renderBenefits() {
+  const p = byId('pointsNum'); if (p) p.textContent = (store.points || 0).toLocaleString();
+  const streak = byId('checkinStreak'); if (streak) streak.textContent = `连续 ${store.checkinDays?.length || 0} 天`;
+  const btn = byId('checkinBtn');
+  if (btn) {
+    const done = (store.checkinDays || []).includes(todayStr());
+    btn.disabled = done;
+    btn.textContent = done ? '今天已签到 ✓' : '签到领小智豆';
+  }
+  const prog = byId('quizProgress'); if (prog) prog.textContent = `${(store.quizDone || []).length} / ${QUIZZES.length}`;
+  const box = byId('quizBox');
+  if (box) {
+    box.innerHTML = '';
+    QUIZZES.forEach((quiz) => {
+      const done = (store.quizDone || []).includes(quiz.id);
+      const card = document.createElement('div');
+      card.className = 'quiz-card';
+      if (done) {
+        card.innerHTML = `<div class="quiz-q">✓ ${esc(quiz.q)}</div><div class="quiz-done">已完成 · +2,000 小智豆</div>`;
+      } else {
+        card.innerHTML = `<div class="quiz-q">${esc(quiz.q)}</div>` +
+          quiz.options.map((o, i) => `<button class="quiz-opt" data-action="answer-quiz" data-qid="${quiz.id}" data-ans="${i}">${esc(o)}</button>`).join('');
+      }
+      box.appendChild(card);
+    });
+  }
+}
+function answerQuiz(qid, el) {
+  const quiz = QUIZZES.find((q) => q.id === qid);
+  if (!quiz) return;
+  store.quizDone = store.quizDone || [];
+  if (store.quizDone.includes(qid)) return;
+  const ans = Number(el.dataset.ans);
+  if (ans !== quiz.answer) { toast('答错了，再想想'); el.classList.add('wrong'); return; }
+  store.quizDone.push(qid);
+  store.points = (store.points || 0) + 2000;
+  persist();
+  renderBenefits();
+  toast('答对了，+2,000 小智豆');
+}
+
+/* ---------- 小智派：配对码加好友 / 连麦 ---------- */
+function myPairCode() {
+  if (!store.myCode) { store.myCode = String(Math.floor(100000 + Math.random() * 900000)); persist(); }
+  return store.myCode;
+}
+function copyMyCode() { copyText(myPairCode()).then(() => toast('配对码已复制，发给好友吧')); }
+function addFriend() {
+  const input = byId('friendCode');
+  const code = (input?.value || '').trim();
+  if (!/^\d{6}$/.test(code)) { toast('配对码是 6 位数字'); return; }
+  if (code === myPairCode()) { toast('这是你自己的配对码'); return; }
+  store.friends = store.friends || [];
+  if (store.friends.some((f) => f.code === code)) { toast('这个好友已经加过了'); return; }
+  store.friends.push({ code, name: '好友 ' + code.slice(-3), at: now() });
+  persist();
+  if (input) input.value = '';
+  renderCircle();
+  toast('添加成功，现在可以连麦了');
+}
+function removeFriend(code) {
+  store.friends = (store.friends || []).filter((f) => f.code !== code);
+  persist(); renderCircle(); toast('已删除好友');
+}
+function callFriend(code) {
+  // 网页端没有真实语音通道，走语音通话页并提示
+  goto('voice');
+  toast('已打开语音通话。真实连麦需要小智派服务端，用配对码在官方 App 里可直接连麦。');
+}
+function renderCircle() {
+  const mc = byId('myCode'); if (mc) mc.textContent = myPairCode();
+  const cnt = byId('friendCount'); if (cnt) cnt.textContent = `${(store.friends || []).length} 人`;
+  const box = byId('friendList');
+  if (!box) return;
+  box.innerHTML = '';
+  if (!(store.friends || []).length) { box.innerHTML = '<p class="friend-empty">还没有好友，输入配对码加一个。</p>'; return; }
+  store.friends.forEach((f) => {
+    const row = document.createElement('div');
+    row.className = 'friend-item';
+    row.innerHTML = `<div class="friend-avatar">${esc(f.name.slice(-2))}</div><div class="friend-name"><strong>${esc(f.name)}</strong><small>配对码 ${esc(f.code)}</small></div>
+      <button class="call-btn" data-action="call-friend" data-friend="${esc(f.code)}" title="连麦"><svg class="icon"><use href="#i-phone"/></svg></button>
+      <button class="friend-del" data-action="remove-friend" data-friend="${esc(f.code)}" title="删除">×</button>`;
+    box.appendChild(row);
+  });
+}
+
+/* ---------- 工作台：工具执行进度 ---------- */
+function showToolProgress(label, step, total) {
+  const box = byId('toolProgress');
+  if (!box) return;
+  box.hidden = false;
+  box.innerHTML = `<span class="tp-spin"></span><span class="tp-text">${esc(label)}</span><span class="tp-step">${step}/${total}</span>`;
+}
+function hideToolProgress() { const box = byId('toolProgress'); if (box) box.hidden = true; }
+
 /* ---------- 启动 ---------- */
 function boot() {
   document.documentElement.style.setProperty('--brand', THEMES.find((t) => t.name === store.theme)?.color || THEMES[0].color);
@@ -1639,6 +1876,8 @@ function boot() {
   renderTasks();
   renderHistory();
   bindHistoryDelete();
+  renderBenefits();
+  renderCircle();
   renderCreateTabs();
   initQianfanUI();
   initSyncUI();

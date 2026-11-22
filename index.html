@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#f6f6f8">
 <meta name="description" content="小智工作台 — 会写代码、能聊天的随身助手">
 <title>小智 · 工作台</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261122f">
-<link rel="apple-touch-icon" href="favicon.svg?v=20261122f">
-<link rel="stylesheet" href="styles.css?v=20261122f">
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261122g">
+<link rel="apple-touch-icon" href="favicon.svg?v=20261122g">
+<link rel="stylesheet" href="styles.css?v=20261122g">
 </head>
 <body>
 
@@ -436,17 +436,45 @@
     <!-- 福利中心 / 小智派（同一占位样式，信息真实说明） -->
     <section class="view view-panel" id="view-benefits">
       <header class="subtopbar"><button class="icon-btn" data-goto="chat" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button><h1>福利中心</h1></header>
-      <div class="panel-scroll"><div class="empty-state"><svg class="icon"><use href="#i-gift"/></svg><h3>这里还没有东西</h3><p>这个入口先留着，等有真实活动再放上来。</p></div></div>
+      <div class="panel-scroll">
+        <div class="points-card"><div class="points-label">我的小智豆</div><div class="points-num" id="pointsNum">0</div><div class="points-sub">签到、答题拿小智豆，去小智派加好友连麦</div></div>
+        <div class="benefit-block">
+          <div class="benefit-head"><strong>每日签到</strong><span id="checkinStreak">连续 0 天</span></div>
+          <p class="benefit-desc">每天来点一下，奖励一天比一天多（5000 起）。</p>
+          <button class="benefit-btn" id="checkinBtn" data-action="checkin">签到领小智豆</button>
+        </div>
+        <div class="benefit-block">
+          <div class="benefit-head"><strong>答题拿豆</strong><span id="quizProgress">0 / 3</span></div>
+          <p class="benefit-desc">回答小智出的小问题，每题 +2000 小智豆。</p>
+          <div id="quizBox"></div>
+        </div>
+      </div>
     </section>
     <section class="view view-panel" id="view-circle">
       <header class="subtopbar"><button class="icon-btn" data-goto="chat" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button><h1>小智派</h1></header>
-      <div class="panel-scroll"><div class="empty-state"><svg class="icon"><use href="#i-brain"/></svg><h3>一个人的小队</h3><p>多人协作还没接上，先把眼前的代码写完。</p></div></div>
+      <div class="panel-scroll">
+        <div class="circle-intro"><strong>找人一起干活</strong><p>输入好友的配对码就能连上，直接语音连麦一起聊。</p></div>
+        <div class="benefit-block">
+          <div class="benefit-head"><strong>我的配对码</strong><button class="mini-btn" id="copyMyCode" data-action="copy-my-code" title="复制"><svg class="icon"><use href="#i-copy"/></svg></button></div>
+          <div class="my-code" id="myCode">------</div>
+          <p class="benefit-desc">把这个 6 位码发给好友，对方在小智派里输入就能加你。</p>
+        </div>
+        <div class="benefit-block">
+          <div class="benefit-head"><strong>加好友</strong></div>
+          <div class="friend-add-row"><input id="friendCode" maxlength="6" placeholder="输入好友的 6 位配对码" autocomplete="off"><button class="benefit-btn compact" data-action="add-friend">添加</button></div>
+        </div>
+        <div class="benefit-block">
+          <div class="benefit-head"><strong>我的好友</strong><span id="friendCount">0 人</span></div>
+          <div id="friendList"></div>
+        </div>
+      </div>
     </section>
   </main>
 
   <!-- 桌面端工具侧栏 -->
   <aside class="side-panel" id="sidePanel">
     <div class="side-head"><span>工作台</span><button class="mini-btn" data-action="close-side" aria-label="收起"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="tool-progress" id="toolProgress" hidden></div>
     <div class="side-section"><h4>当前对话</h4><div id="sideContext" class="side-context">还没有对话。发一条消息试试。</div></div>
     <div class="side-section"><h4>快捷工具</h4><div class="side-tools" id="sideTools"></div></div>
     <div class="side-section grow"><h4>生成记录</h4><div id="sideAssets" class="side-assets">图片、视频和代码会出现在这里。</div></div>
@@ -469,6 +497,16 @@
   <div class="sheet-body">
     <div class="sheet-head"><strong id="promptTitle">提示</strong><button class="icon-btn" data-action="close-sheet" aria-label="关闭"><svg class="icon"><use href="#i-close"/></svg></button></div>
     <div id="promptContent" class="prompt-content"></div>
+  </div>
+</div>
+
+<!-- 全局搜索弹层 -->
+<div class="sheet" id="searchSheet">
+  <div class="sheet-backdrop" data-action="close-sheet"></div>
+  <div class="sheet-body">
+    <div class="sheet-head"><strong>搜索</strong><button class="icon-btn" data-action="close-sheet" aria-label="关闭"><svg class="icon"><use href="#i-close"/></svg></button></div>
+    <div class="search-box"><svg class="icon"><use href="#i-search"/></svg><input id="globalSearch" type="search" placeholder="搜技能、工具、对话…" autocomplete="off"></div>
+    <div id="searchResults" class="search-results"></div>
   </div>
 </div>
 
@@ -508,9 +546,9 @@
     else window.__sdkWaiters.push(fn);
   };
 </script>
-<script src="qianfan.js?v=20261122f"></script>
-<script src="github-sync.js?v=20261122f"></script>
-<script src="app.js?v=20261122f"></script>
-<script src="mcp.js?v=20261122f"></script>
+<script src="qianfan.js?v=20261122g"></script>
+<script src="github-sync.js?v=20261122g"></script>
+<script src="app.js?v=20261122g"></script>
+<script src="mcp.js?v=20261122g"></script>
 </body>
 </html>
