@@ -885,6 +885,32 @@ function recordAsset(type, text) {
   box.prepend(item);
 }
 
+/* ---------- 供 MCP 工具调用的通用接口 ---------- */
+async function xzAsk(prompt, system = SYSTEM_PROMPT) {
+  if (!state.cloudReady || !state.model) throw new Error('云端模型未连接');
+  let out = '';
+  for await (const chunk of cloud.llm.chat.completions.create({
+    model: state.model.id,
+    messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+    stream: true,
+    temperature: 0.7,
+  })) {
+    const d = chunk.choices?.[0]?.delta;
+    if (d?.content) out += d.content;
+  }
+  return out;
+}
+
+// 暴露给 mcp.js 使用，避免把内部状态散落到两个文件
+window.XZ = {
+  ask: xzAsk,
+  localSVG,
+  localStoryboard,
+  toast,
+  isCloudReady: () => state.cloudReady && !!state.model,
+  systemPrompt: SYSTEM_PROMPT,
+};
+
 /* ---------- 环境自适应 ---------- */
 // 云端域名能校验 Origin 调真模型；GitHub Pages 等静态域名只能跑本地能力。
 const CLOUD_HOST = 'xiaozhi-studio-61540.app.workbuddy.host';

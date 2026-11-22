@@ -261,11 +261,59 @@
           <button class="set-row" data-goto="voice-settings"><svg class="icon"><use href="#i-person"/></svg><span>个性化</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="theme"><svg class="icon"><use href="#i-palette"/></svg><span>主题色</span><span class="row-value" id="themeValue">默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="voices"><svg class="icon"><use href="#i-book"/></svg><span>朗读设置</span><span class="row-value" id="voiceValue">静静</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+          <button class="set-row" data-goto="mcp"><svg class="icon"><use href="#i-brain"/></svg><span>小智 AI 连接</span><span class="row-value" id="mcpStatusMini">未连接</span><svg class="icon chev"><use href="#i-right"/></svg></button>
         </div>
         <div class="settings-group">
           <button class="set-row" data-action="notice"><svg class="icon"><use href="#i-bell"/></svg><span>消息通知</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="privacy"><svg class="icon"><use href="#i-shield"/></svg><span>数据与隐私</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-action="about"><svg class="icon"><use href="#i-info"/></svg><span>关于小智</span><span class="row-value">v1.0</span><svg class="icon chev"><use href="#i-right"/></svg></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 小智 AI MCP 连接 -->
+    <section class="view view-panel" id="view-mcp">
+      <header class="subtopbar">
+        <button class="icon-btn" data-goto="settings" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button>
+        <h1>小智 AI 连接</h1>
+      </header>
+      <div class="panel-scroll">
+        <div class="mcp-intro">
+          <span class="mcp-dot" id="mcpDot"></span>
+          <div>
+            <strong id="mcpStatus">未连接</strong>
+            <p>让小智 AI 连进来调用网页工具：写代码、画图、分镜。token 只存在这台设备。</p>
+          </div>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <label class="field-label">MCP Token</label>
+          <div class="mcp-token-row">
+            <input id="mcpToken" type="password" placeholder="粘贴小智 AI 的 MCP token" autocomplete="off" spellcheck="false">
+            <button class="mini-btn" id="mcpToggle" aria-label="显示/隐藏"><svg class="icon"><use href="#i-search"/></svg></button>
+          </div>
+          <div class="mcp-actions">
+            <button class="mcp-btn ghost" id="mcpSave">保存本机</button>
+            <button class="mcp-btn primary" id="mcpConnect">连接</button>
+            <button class="mcp-btn ghost" id="mcpDisconnect">断开</button>
+          </div>
+          <p class="mcp-hint">token 来自小智 AI 平台，仅保存在浏览器本地存储，不会写进网页代码或上传到任何服务器。</p>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <div class="mcp-sec-head"><strong>可调用的工具</strong><span id="mcpCalls">已响应 0 次调用</span></div>
+          <div id="mcpTools" class="mcp-tools"></div>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <div class="mcp-sec-head"><strong>连接日志</strong></div>
+          <div id="mcpLog" class="mcp-log"><div class="mcp-log-line">等待连接…</div></div>
+        </div>
+
+        <div class="settings-group" style="padding:16px">
+          <div class="mcp-sec-head"><strong>小智刚画的图</strong></div>
+          <div id="mcpArt" class="mcp-art" style="display:none"></div>
+          <p class="mcp-hint" id="mcpArtHint">小智调用画图工具时，作品会显示在这里。</p>
         </div>
       </div>
     </section>
@@ -349,5 +397,6 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
 <script src="app.js"></script>
+<script src="mcp.js"></script>
 </body>
 </html>
