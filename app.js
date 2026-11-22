@@ -114,7 +114,7 @@ const THEMES = [
 const STORE_KEY = 'xiaozhi-studio-v1';
 const defaults = {
   voice: '', speechRate: 1, speechPitch: 1, autoRead: true, theme: '默认', memoryOn: true,
-  hiddenVoices: [],
+  hiddenVoices: [], asrLang: '',
   history: [], tasks: [], memories: [], assets: [], favs: ['旅游计划', '对比解读', 'PPT 制作'],
 };
 let store = { ...defaults };
@@ -679,6 +679,12 @@ function voiceLabel(v, idx) {
   const raw = String(v.name || v.voiceURI || '');
   let cn = '';
   for (const [re, name] of VOICE_CN_MAP) { if (re.test(raw)) { cn = name; break; } }
+  // 设备原名里本来就带中文（比如「Microsoft 晓晓」「中文(中国)」）就直接保留，
+  // 千万别把用户能看懂的中文名丢掉、换成「中文声音 1」这种通用叫法。
+  if (!cn) {
+    const zh = raw.match(/[\u4e00-\u9fa5]{2,}/g);
+    if (zh && zh.length) cn = zh.join('').slice(0, 10);
+  }
   const lang = langLabel(v.lang);
   const natural = /natural|neural/i.test(raw) ? '自然音色' : '';
   const base = cn || ((lang && lang !== '其他' ? lang : '') + '声音' + (idx ? ' ' + idx : ''));
@@ -709,6 +715,15 @@ function renderVoices() {
     <div class="voice-switches">
       <label class="voice-switch"><input type="checkbox" id="autoReadToggle" ${store.autoRead ? 'checked' : ''}><span>边写边读（文字一边出、声音一边念）</span></label>
       <label class="voice-rate">语速 <input type="range" id="speechRate" min="0.6" max="1.6" step="0.1" value="${store.speechRate ?? 1}"><span id="rateVal">${store.speechRate ?? 1}×</span></label>
+      <label class="voice-rate">说话识别
+        <select id="asrLang" class="asr-select">
+          <option value="" ${!store.asrLang ? 'selected' : ''}>自动（推荐）</option>
+          <option value="cmn-Hans-CN" ${store.asrLang === 'cmn-Hans-CN' ? 'selected' : ''}>中文普通话</option>
+          <option value="zh-CN" ${store.asrLang === 'zh-CN' ? 'selected' : ''}>中文（简体）</option>
+          <option value="zh-TW" ${store.asrLang === 'zh-TW' ? 'selected' : ''}>中文（繁体）</option>
+          <option value="yue-Hant-HK" ${store.asrLang === 'yue-Hant-HK' ? 'selected' : ''}>粤语</option>
+        </select>
+      </label>
       <button class="voice-refresh" id="voiceRefresh" title="重新读取设备声音"><svg class="icon"><use href="#i-redo"/></svg> 重新读取</button>
     </div>`;
   box.appendChild(head);
@@ -791,6 +806,8 @@ function renderVoices() {
   if (toggle) toggle.onchange = () => { store.autoRead = toggle.checked; persist(); if (!toggle.checked) stopSpeech(); };
   const rate = byId('speechRate');
   if (rate) rate.oninput = () => { store.speechRate = parseFloat(rate.value); byId('rateVal').textContent = store.speechRate.toFixed(1) + '×'; persist(); };
+  const asr = byId('asrLang');
+  if (asr) asr.onchange = () => { store.asrLang = asr.value; persist(); toast(asr.value ? '说话识别语言已切换' : '已恢复自动识别'); };
   const refresh = byId('voiceRefresh');
   if (refresh) refresh.onclick = () => { window.speechSynthesis?.getVoices(); renderVoices(); toast('已重新读取设备声音'); };
 }
@@ -800,19 +817,54 @@ function setOrbListening(on) {
   byId('voiceOrb')?.classList.toggle('listening', !!on);
 }
 
+// 选一个设备真正认的「中文」标签。很多安卓/国产浏览器不认 zh-CN，
+// 直接退回英文识别——按顺序挑系统声音里存在的中文标签，避免识别成英文。
+const ASR_LANGS = ['cmn-Hans-CN', 'zh-CN', 'zh_CN', 'zh-Hans', 'zh'];
+function pickAsrLang() {
+  const forced = (store.asrLang || '').trim();
+  if (forced) return forced;
+  try {
+    const langs = new Set((window.speechSynthesis?.getVoices() || []).map((v) => (v.lang || '').replace('_', '-').toLowerCase()));
+    for (const l of ASR_LANGS) {
+      const key = l.replace('_', '-').toLowerCase();
+      for (const have of langs) {
+        if (have === key || have.startsWith(key.split('-')[0])) return l;
+      }
+    }
+  } catch (e) {}
+  return 'zh-CN';
+}
+// 只取最终结果，临时结果单独显示，避免文字反复叠加乱跳
+function collectFinalText(results) {
+  let finalText = '', interimText = '';
+  for (let i = 0; i < results.length; i++) {
+    const alt = results[i][0];
+    if (results[i].isFinal) finalText += alt.transcript;
+    else interimText += alt.transcript;
+  }
+  return { finalText, interimText };
+}
+
 function toggleVoiceInput() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('这个浏览器不支持语音识别，用键盘输入吧'); return; }
   if (state.recognition) { state.recognition.stop(); state.recognition = null; return; }
   const rec = new SR();
-  rec.lang = 'zh-CN';
+  rec.lang = pickAsrLang();
   rec.interimResults = true;
+  rec.continuous = false;
+  let finalText = '';
   rec.onresult = (e) => {
-    let text = '';
-    for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
-    setInput(text);
+    const { finalText: f, interimText } = collectFinalText(e.results);
+    if (f) finalText = f;
+    setInput((finalText + interimText).trim()); // 每帧重建，不累积，杜绝乱跳
   };
-  rec.onerror = () => { toast('没听清，再说一次'); state.recognition = null; };
+  rec.onerror = (ev) => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('没给麦克风权限，去浏览器设置里允许一下');
+    else toast('没听清，再说一次');
+    state.recognition = null;
+    byId('voiceInput').classList.remove('send-on');
+  };
   rec.onend = () => { state.recognition = null; byId('voiceInput').classList.remove('send-on'); };
   rec.start();
   state.recognition = rec;
@@ -882,20 +934,25 @@ function toggleMic() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { toast('这个浏览器不支持语音识别，用键盘输入吧'); return; }
   const rec = new SR();
-  rec.lang = 'zh-CN';
+  rec.lang = pickAsrLang();
   rec.interimResults = true;
   rec.continuous = false;
-  let said = '';
+  let finalText = '';
   rec.onresult = (e) => {
-    let text = '';
-    for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
-    said = text;
-    setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> ' + (text || '在听…'));
+    const f = collectFinalText(e.results);
+    if (f.finalText) finalText = f.finalText;
+    const shown = (finalText + f.interimText).trim();
+    setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> ' + (shown || '在听…'));
   };
-  rec.onerror = () => { toast('没听清，再说一次'); setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 点击麦克风开始说话'); state.recognition = null; };
+  rec.onerror = (ev) => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('没给麦克风权限，去浏览器设置里允许一下');
+    else toast('没听清，再说一次');
+    setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 点击麦克风开始说话');
+    state.recognition = null;
+  };
   rec.onend = () => {
     state.recognition = null;
-    if (said && said.trim()) { setVoiceTranscript('me', said.trim()); callAIFromVoice(said.trim()); }
+    if (finalText && finalText.trim()) { setVoiceTranscript('me', finalText.trim()); callAIFromVoice(finalText.trim()); }
     else setVoiceStatus('<span class="eq"><i></i><i></i><i></i><i></i></span> 点击麦克风开始说话');
   };
   rec.start();
