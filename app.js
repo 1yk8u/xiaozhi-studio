@@ -1184,7 +1184,13 @@ function boot() {
     window.speechSynthesis.addEventListener?.('voiceschanged', renderVoices);
   }
   if (isCloudHost()) {
-    initCloud();
+    byId('modelCurrent').textContent = '正在准备云端…';
+    // SDK 异步加载：就绪后再初始化云端，界面与所有按钮不受 CDN 加载影响
+    if (typeof window.whenSdk === 'function') {
+      window.whenSdk(() => initCloud());
+    } else {
+      initCloud();
+    }
   } else {
     showEnvBanner();
     byId('modelCurrent').textContent = '静态版不加载云端模型。工具与朗读可正常使用，真 AI 请用云端版。';

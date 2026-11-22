@@ -398,7 +398,39 @@
 <!-- 吐司 -->
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js"></script>
+<!-- SDK 异步加载：即使 CDN 慢/挂，也不阻塞界面脚本，保证所有按钮可用 -->
+<script>
+  window.__sdkReady = false;
+  window.__sdkWaiters = [];
+  (function () {
+    var s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/@tencent-ai/workbuddy-cloud-sdk@dev/lib/index.global.js';
+    s.async = true;
+    s.onload = function () {
+      window.__sdkReady = true;
+      window.__sdkWaiters.forEach(function (fn) { try { fn(); } catch (e) {} });
+      window.__sdkWaiters = [];
+    };
+    s.onerror = function () {
+      window.__sdkError = true;
+      window.__sdkWaiters.forEach(function (fn) { try { fn(); } catch (e) {} });
+      window.__sdkWaiters = [];
+    };
+    // 8 秒兜底：CDN 一直不回也放行，界面不被拖死
+    setTimeout(function () {
+      if (!window.__sdkReady && window.__sdkWaiters.length) {
+        window.__sdkTimeout = true;
+        window.__sdkWaiters.forEach(function (fn) { try { fn(); } catch (e) {} });
+        window.__sdkWaiters = [];
+      }
+    }, 8000);
+    document.head.appendChild(s);
+  })();
+  window.whenSdk = function (fn) {
+    if (window.__sdkReady || window.__sdkError || window.__sdkTimeout) fn();
+    else window.__sdkWaiters.push(fn);
+  };
+</script>
 <script src="app.js"></script>
 <script src="mcp.js"></script>
 </body>
