@@ -1770,7 +1770,7 @@ function isCloudHost() {
 }
 function showEnvBanner() {
   const banner = byId('envBanner');
-  banner.innerHTML = `<span>数据只存本机。要让 AI 真对话：去「设置 → 千帆 AI」填 key（免费模型即可），静态版也能用。</span><button data-action="dismiss-banner" aria-label="关闭"><svg class="icon"><use href="#i-close"/></svg></button>`;
+  banner.innerHTML = `<span>数据存在这台设备的硬盘里，历史一直都在。要让 AI 真对话：点输入框左边的「模型」按钮，第一次用配置一次即可。</span><button data-action="dismiss-banner" aria-label="关闭"><svg class="icon"><use href="#i-close"/></svg></button>`;
   banner.hidden = false;
   banner.querySelector('[data-action="dismiss-banner"]').onclick = () => { banner.hidden = true; };
 }
