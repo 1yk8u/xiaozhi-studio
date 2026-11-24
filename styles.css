@@ -612,3 +612,17 @@ h1, h2, h3, h4, p { margin: 0; }
 .avatar-choices { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .avatar-choice { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line, #e5e5ea); background: #fafafa; font-size: 18px; }
 .avatar-choice.sel { border-color: var(--brand, #07b857); background: var(--brand-soft, #e8f8ee); }
+
+/* ---------- 模型可用性修复：缺 key 也能看到模型并一键填 key ---------- */
+.model-key-entry { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; margin-top: 14px; padding: 12px; border: 0; border-radius: 12px; background: var(--brand-soft, #e8f8ee); color: var(--brand, #07b857); font-size: 13.5px; font-weight: 650; }
+.model-key-entry:active { opacity: .8; }
+.model-key-entry .icon { width: 16px; height: 16px; }
+.mo-tag.need { background: #fff2df; color: #b7740f; }
+.inline-fix-btn { margin-top: 10px; padding: 10px 16px; border: 0; border-radius: 10px; background: var(--brand, #07b857); color: #fff; font-size: 13px; font-weight: 600; }
+
+/* ---------- 输入框里的模型切换按钮（开源模型和小智同级） ---------- */
+.composer-model { flex: none; display: inline-flex; align-items: center; gap: 4px; max-width: 108px; height: 34px; padding: 0 9px; border: 1px solid var(--line, #e5e5ea); border-radius: 18px; background: var(--surface-2, #f3f3f5); color: #4a4a52; cursor: pointer; }
+.composer-model:active { background: var(--brand-soft, #e8f8ee); }
+.composer-model .icon { width: 15px; height: 15px; flex: none; color: var(--brand, #07b857); }
+.composer-model span { font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 380px) { .composer-model { max-width: 76px; } }

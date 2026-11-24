@@ -321,13 +321,17 @@ function initCloud() {
 }
 
 function qianfanModels() {
-  if (!window.QIANFAN?.getKey?.()) return [];
+  // 关键修复：不因为「没填 key」就把模型藏掉。
+  // 模型永远可见、可选，缺 key 只是标个「需填 key」，点下去会引导你填。
+  if (!window.QIANFAN?.models) return [];
+  const hasKey = !!window.QIANFAN?.getKey?.();
   return window.QIANFAN.models().map((m) => ({
     id: m.id,
     name: m.name,
     description: m.note,
     source: 'qianfan',
     free: m.free,
+    needsKey: !hasKey,
   }));
 }
 
@@ -359,17 +363,36 @@ async function loadModels() {
   // 千帆 key 一填就能进列表，即使云端完全没连上
   if (assembleModels(cloudModels)) {
     const qfCount = state.models.filter((m) => m.source === 'qianfan').length;
+    const hasKey = !!window.QIANFAN?.getKey?.();
     const parts = [];
-    if (state.cloudReady) parts.push(`${cloudModels.length} 个云端模型`);
+    if (state.cloudReady && cloudModels.length) parts.push(`${cloudModels.length} 个云端模型`);
     if (qfCount) parts.push(`${qfCount} 个千帆模型`);
     byId('modelCurrent').textContent = parts.length
-      ? `可选：${parts.join(' + ')}`
-      : '当前没有可用模型，去设置里填千帆 key 或刷新。';
+      ? `可选：${parts.join(' + ')}${hasKey || state.cloudReady ? '' : ' · 选一个后会引导填 key'}`
+      : '当前没有可用模型，点下方按钮填千帆 key。';
     renderModelOptions();
     updateSideContext();
+    renderModelFooter(hasKey);
   } else {
-    byId('modelCurrent').textContent = '没有可用模型：去「设置 → 千帆 AI」填 key，或用云端版链接。';
+    byId('modelCurrent').textContent = '没有可用模型：点下方按钮填千帆 key，就能开始对话。';
+    renderModelFooter(false);
   }
+}
+
+// 模型弹层底部永远留一个「填 key / 换 key」入口，不因为隐藏高级设置就找不到
+function renderModelFooter(hasKey) {
+  const sheet = byId('modelSheet');
+  if (!sheet) return;
+  let foot = byId('modelKeyEntry');
+  if (!foot) {
+    foot = document.createElement('button');
+    foot.id = 'modelKeyEntry';
+    foot.className = 'model-key-entry';
+    foot.type = 'button';
+    sheet.querySelector('.sheet-body')?.appendChild(foot);
+  }
+  foot.innerHTML = `<svg class="icon"><use href="#i-spark"/></svg> ${hasKey ? '千帆 key 已填，点这里更换或测试' : '第一次用？点这里填千帆 key（免费）'}`;
+  foot.onclick = () => { closeSheets(); goto('qianfan'); };
 }
 
 function renderModelOptions() {
@@ -381,7 +404,9 @@ function renderModelOptions() {
     const name = m.name || m.id;
     const desc = m.description || ['快答：日常问题，响应更快', '深度：复杂推理，想得更透', '专家：适合多步任务'][Math.min(i, 2)];
     const tag = m.source === 'qianfan'
-      ? `<span class="mo-tag ${m.free ? 'free' : ''}">${m.free ? '免费' : '千帆'}</span>`
+      ? (m.needsKey
+        ? '<span class="mo-tag need">需填 key</span>'
+        : `<span class="mo-tag ${m.free ? 'free' : ''}">${m.free ? '免费' : '千帆'}</span>`)
       : '';
     btn.innerHTML = `<span class="mo-main"><strong>${esc(name)} ${tag}</strong><small>${esc(desc)}</small></span><svg class="icon check"><use href="#i-check"/></svg>`;
     btn.onclick = () => {
@@ -390,11 +415,20 @@ function renderModelOptions() {
       persist();
       renderModelOptions();
       updateSideContext();
+      if (m.needsKey) {
+        closeSheets();
+        goto('qianfan');
+        toast('选好模型了，填上 key 就能用');
+        return;
+      }
       closeSheets();
       toast(`已切到 ${name}`);
     };
     box.appendChild(btn);
   });
+  // 输入框上的模型按钮同步显示当前模型（开源模型和小智都在弹层里）
+  const label = byId('composerModelName');
+  if (label && state.model) label.textContent = (state.model.name || state.model.id || '模型').slice(0, 12);
 }
 
 function friendlyError(err) {
@@ -492,6 +526,7 @@ document.addEventListener('click', (e) => {
     attach: () => toast('直接把要做的告诉小智，写代码、出图都能在对话里完成'),
     'voice-input': toggleVoiceInput,
     'pick-mode': () => openSheet('modelSheet'),
+    'pick-model': () => openSheet('modelSheet'),
     'voice-person': () => goto('voices'),
     'toggle-camera': toggleCamera,
     'toggle-mic': toggleMic,
@@ -794,7 +829,9 @@ async function sendMessage(override) {
       if (full) restoreActions(reply, full);
     } else {
       const msg = friendlyError(err);
-      reply.content.innerHTML = renderText(full) + (full ? '<br><br>' : '') + `<span style="color:#c04747">${esc(msg)}</span>`;
+      const needKey = currentSource() === 'qianfan' && !window.QIANFAN?.getKey?.();
+      reply.content.innerHTML = renderText(full) + (full ? '<br><br>' : '') + `<span style="color:#c04747">${esc(msg)}</span>`
+        + (needKey ? '<br><button class="inline-fix-btn" data-goto="qianfan">去填千帆 key（免费，填一次一直用）</button>' : '');
       const retry = document.createElement('button');
       retry.className = 'tag';
       retry.style.marginTop = '10px';
@@ -2044,20 +2081,16 @@ function boot() {
     if (typeof window.whenSdk === 'function') {
       window.whenSdk(() => {
         initCloud();
-        // 云端 SDK 即便没就绪，千帆 key 也要进模型列表
-        if (!state.cloudReady && window.QIANFAN?.getKey?.()) loadModels();
+        // 云端 SDK 即便没就绪，千帆模型也要进列表（没 key 也列出并引导填）
+        if (!state.cloudReady) loadModels();
       });
     } else {
       initCloud();
     }
   } else {
     showEnvBanner();
-    // 静态版：有千帆 key 就加载千帆模型，真 AI 照样能用
-    if (window.QIANFAN?.getKey?.()) {
-      loadModels();
-    } else {
-      byId('modelCurrent').textContent = '去「设置 → 千帆 AI」填 key，静态版也能用真 AI。';
-    }
+    // 静态版：千帆模型永远列出（没 key 也列出并引导填），真 AI 照样能用
+    loadModels();
   }
 }
 
