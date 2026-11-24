@@ -69,6 +69,9 @@ const SKILLS = [
 
 // 预置智能体：点一下就带着人设跟你聊，也可以直接「自动生成」
 const BUILTIN_AGENTS = [
+  { id: 'team', name: '开发团队', emoji: '🛠️', bg: '#e8f7f2', desc: '一句话，多个 Agent 接力：规划→开发→调试→打包文件', team: true,
+    system: '你是开发团队的调度员。',
+    auto: '帮我做一个清爽好用的小工具网页，含几个实用功能和完整的移动端适配。' },
   { id: 'coder', name: '编程助手', emoji: '💻', bg: '#eef2ff', desc: '写代码、改 bug、重构，给能直接跑的结果',
     system: '你是一名资深全栈工程师。用户要代码就直接给完整可运行的代码，放代码块里，关键处写中文注释；先给结论再说明理由，指出容易踩的坑。不确定就直说，绝不编造 API。代码注释用中文。',
     auto: '帮我写一个实用的小工具代码，要求能直接运行、关键处有中文注释。' },
@@ -282,19 +285,20 @@ const state = {
 /* ---------- 统一模型通道：云端 SDK 或本地已配置模型 ---------- */
 function currentSource() { return state.model?.source === 'qianfan' ? 'qianfan' : 'cloud'; }
 
-// 统一流式接口：产出纯文本增量，屏蔽底层差异
-async function* streamChat(messages, signal) {
+// 统一流式接口：产出纯文本增量，屏蔽底层差异。modelOverride 用于多 Agent 各阶段指定模型。
+async function* streamChat(messages, signal, modelOverride) {
+  const modelId = modelOverride || state.model?.id;
   const src = currentSource();
   if (src === 'qianfan') {
     if (!window.QIANFAN) throw new Error('模型脚本还没加载，刷新页面重试');
-    for await (const text of window.QIANFAN.chatStream(messages, state.model.id, signal)) {
+    for await (const text of window.QIANFAN.chatStream(messages, modelId, signal)) {
       yield text;
     }
     return;
   }
   if (!state.cloudReady) throw new Error('云端还没连上，刷新页面重试');
   for await (const chunk of cloud.llm.chat.completions.create({
-    model: state.model.id,
+    model: modelId,
     messages,
     stream: true,
     temperature: 0.7,
@@ -368,7 +372,9 @@ function assembleModels(cloudModels = []) {
   state.models = merged;
   if (!merged.length) return false;
   const savedId = store.modelId;
-  state.model = merged.find((m) => m.id === savedId) || merged[0];
+  // 默认优先用云端免费模型（0 积分），避免用户一上来就扣额度
+  const freeModel = merged.find((m) => m.id === 'hy4flash-free' && m.source === 'cloud');
+  state.model = merged.find((m) => m.id === savedId) || freeModel || merged[0];
   return true;
 }
 
@@ -729,6 +735,193 @@ function detectToolIntent(text) {
   return null;
 }
 
+/* ---------- 多 Agent 开发团队：一句话 → 规划 → 开发 → 调试 → 打包文件 ---------- */
+const TEAM_STAGES = [
+  { key: 'plan', icon: '📋', name: '规划师', hint: '拆解需求、列功能清单和技术要点',
+    system: '你是开发团队的资深产品经理。用户用一句话描述想做的东西。把它整理成一份可执行的开发规格：①一句话目标 ②功能清单（3-6 条，具体）③界面与交互要点 ④技术要点 ⑤验收标准。用中文，简洁分点，不要写代码，不要问问题，合理补全用户没说的细节。' },
+  { key: 'code', icon: '💻', name: '工程师', hint: '按规格写出完整单文件网页',
+    system: '你是开发团队的资深前端工程师。按给定的开发规格，写出一个完整、可直接双击打开就能运行的单文件 HTML 页面：内联 CSS 和 JS，响应式，适配手机和电脑，不依赖任何外部资源（不用 CDN、外链图片、外部字体），关键处用中文注释。只输出一个 ```html 代码块，代码块里必须是完整 HTML 文档（含 <!DOCTYPE html>），不要写任何解释文字。' },
+  { key: 'debug', icon: '🐛', name: '测试员', hint: '审查、修 bug、产出最终代码',
+    system: '你是开发团队的测试与代码审查工程师。审查给定的 HTML 代码：修复 JS 语法错误、事件绑定问题、移动端适配问题，并补齐规格里要求但没实现的功能。只输出修复后的【完整】单文件 HTML，放在一个 ```html 代码块里，代码块内含 <!DOCTYPE html> 的完整文档。不要解释，不要只给补丁片段。' },
+];
+function pickTeamModelId() {
+  const free = state.models.find((m) => m.id === 'hy4flash-free' && m.source === 'cloud');
+  return free ? free.id : state.model?.id;
+}
+function extractFirstCode(s) {
+  const m = String(s || '').match(/```[\w-]*\n([\s\S]*?)```/);
+  return m ? m[1].trim() : String(s || '').trim();
+}
+function ensureFullHtml(code) {
+  let c = String(code || '').trim().replace(/^```[\w-]*\n?/, '').replace(/```$/, '').trim();
+  if (/<html[\s>]/i.test(c)) return c;
+  return '<!DOCTYPE html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小智生成</title></head><body>\n' + c + '\n</body></html>';
+}
+function stageUserPrompt(i, text, spec, code) {
+  if (i === 0) return `用户想要的东西：${text}\n\n请给出开发规格。`;
+  if (i === 1) return `按下面的开发规格写出完整单文件 HTML 页面。\n\n开发规格：\n${spec}`;
+  return `原始需求：${text}\n\n待审查的代码：\n${code}\n\n请审查修复，输出修复后的完整 HTML。`;
+}
+
+async function runTeamPipeline(text, reply) {
+  const controller = new AbortController();
+  state.controller = controller;
+  state.busy = true;
+  const modelId = pickTeamModelId();
+  const ctx = state.currentChat.context.slice(-12);
+  let spec = '', code = '', finalCode = '';
+  const card = document.createElement('div');
+  card.className = 'team-flow';
+  reply.content.appendChild(card);
+  const badge = document.createElement('div');
+  badge.className = 'auto-tool-badge';
+  badge.innerHTML = `<svg class="icon"><use href="#i-toolbox"/></svg> 开发团队接力中 · 规划 → 开发 → 调试 → 打包`;
+  reply.wrap.querySelector('.msg-body').insertBefore(badge, reply.content);
+  showToolProgress('开发团队开始工作', 1, 4);
+
+  try {
+    for (let i = 0; i < TEAM_STAGES.length; i++) {
+      const st = TEAM_STAGES[i];
+      const node = document.createElement('div');
+      node.className = 'team-stage';
+      node.innerHTML = `<div class="ts-head"><span class="ts-ico">${st.icon}</span><span class="ts-name">${st.name}</span><span class="ts-role">${st.hint}</span><span class="ts-state">工作中…</span></div><div class="ts-out"></div>`;
+      card.appendChild(node);
+      const out = node.querySelector('.ts-out');
+      const stateEl = node.querySelector('.ts-state');
+      const userPrompt = stageUserPrompt(i, text, spec, code);
+      const messages = [{ role: 'system', content: st.system }, ...ctx, { role: 'user', content: userPrompt }];
+      showToolProgress(`${st.name} 工作中`, i + 1, 4);
+      let acc = '';
+      for await (const piece of streamChat(messages, controller.signal, modelId)) {
+        acc += piece;
+        out.innerHTML = renderText(acc);
+        scrollToBottom();
+      }
+      stateEl.textContent = '完成';
+      stateEl.classList.add('done');
+      node.classList.add('done');
+      if (i === 0) spec = acc;
+      else if (i === 1) code = extractFirstCode(acc);
+      else finalCode = extractFirstCode(acc) || code;
+      ctx.push({ role: 'user', content: userPrompt }, { role: 'assistant', content: acc });
+    }
+    const html = ensureFullHtml(finalCode || code);
+    showToolProgress('打包成文件', 4, 4);
+    renderTeamFiles(card, html, text);
+    const finalText = finalCode || code;
+    state.currentChat.context.push({ role: 'user', content: text }, { role: 'assistant', content: finalText });
+    state.currentChat.context = state.currentChat.context.slice(-20);
+    state.currentChat.title = state.currentChat.context.length <= 2 ? text.slice(0, 22) : state.currentChat.title;
+    restoreActions(reply, finalText);
+    persist();
+    updateSideContext();
+    recordAsset('网页', text.slice(0, 60));
+    toast('四个 Agent 接力完成，文件已打包');
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      const p = document.createElement('div');
+      p.className = 'team-error';
+      p.textContent = '已停止。';
+      card.appendChild(p);
+    } else {
+      const p = document.createElement('div');
+      p.className = 'team-error';
+      p.textContent = friendlyError(err);
+      card.appendChild(p);
+    }
+  } finally {
+    state.busy = false;
+    state.controller = null;
+    hideToolProgress();
+    syncSendBtn();
+    scrollToBottom();
+  }
+}
+
+function renderTeamFiles(card, html, text) {
+  const wrap = document.createElement('div');
+  wrap.className = 'team-files';
+  wrap.innerHTML = `
+    <div class="tf-title">📦 已打包好，直接下载就能用</div>
+    <div class="tf-preview"><iframe sandbox="allow-scripts" srcdoc="${esc(html)}"></iframe></div>
+    <div class="tf-actions">
+      <button class="tf-btn primary" data-tf="html">⬇ 下载网页文件</button>
+      <button class="tf-btn" data-tf="pwa">📱 打包手机应用</button>
+      <button class="tf-btn" data-tf="copy">复制代码</button>
+    </div>
+    <p class="tf-note">网页文件双击即可打开；「打包手机应用」给的是可添加到手机主屏幕的网页 App。真正的 .apk 安装包需要安卓构建环境，浏览器里做不出来。</p>`;
+  card.appendChild(wrap);
+  const base = (text.replace(/[^\w\u4e00-\u9fa5]/g, '').slice(0, 10) || 'app');
+  wrap.querySelector('[data-tf="html"]').onclick = () => download(html, base + '.html', 'text/html;charset=utf-8');
+  wrap.querySelector('[data-tf="copy"]').onclick = () => copyText(html).then(() => toast('代码已复制'));
+  wrap.querySelector('[data-tf="pwa"]').onclick = () => {
+    const manifest = {
+      name: base, short_name: base, start_url: './index.html', display: 'standalone',
+      background_color: '#ffffff', theme_color: '#07b857',
+      icons: [{ src: 'icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any maskable' }],
+    };
+    const icon = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192"><rect width="192" height="192" rx="40" fill="#07b857"/><text x="50%" y="54%" font-size="96" text-anchor="middle" dominant-baseline="middle" fill="#fff">&gt;_</text></svg>';
+    const sw = "const C='app-cache-v1';self.addEventListener('install',e=>{e.waitUntil(caches.open(C).then(c=>c.addAll(['./','./index.html','./manifest.webmanifest','./icon.svg'])).then(()=>self.skipWaiting()))});self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==C).map(x=>caches.delete(x)))).then(()=>self.clients.claim()))});self.addEventListener('fetch',e=>{e.respondWith(caches.match(e.request).then(r=>r||fetch(e.request)))})";
+    downloadBlob(makeZip([
+      { name: 'index.html', data: html },
+      { name: 'manifest.webmanifest', data: JSON.stringify(manifest, null, 2) },
+      { name: 'sw.js', data: sw },
+      { name: 'icon.svg', data: icon },
+      { name: '使用说明.txt', data: '把这个文件夹用任意静态服务器打开（需 HTTPS），用手机浏览器访问后选「添加到主屏幕」，就像一个 App。\n真正的 .apk 需要用 Android Studio 或在线打包服务把网页套壳构建，浏览器内无法生成。' },
+    ]), base + '-手机应用.zip');
+    toast('已打包手机网页 App，解压后部署即可安装');
+  };
+}
+
+/* ---------- 纯前端 ZIP 打包（store，无压缩，零依赖） ---------- */
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1); t[i] = c >>> 0; }
+  return t;
+})();
+function crc32(bytes) { let c = 0xFFFFFFFF; for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files) {
+  const enc = new TextEncoder();
+  const chunks = [], central = [];
+  let offset = 0;
+  files.forEach((f) => {
+    const nameBytes = enc.encode(f.name);
+    const dataBytes = enc.encode(f.data || '');
+    const crc = crc32(dataBytes);
+    const local = new Uint8Array(30 + nameBytes.length);
+    const dv = new DataView(local.buffer);
+    dv.setUint32(0, 0x04034b50, true); dv.setUint16(4, 20, true); dv.setUint16(6, 0x0800, true);
+    dv.setUint16(8, 0, true); dv.setUint16(10, 0, true); dv.setUint16(12, 0, true);
+    dv.setUint32(14, crc, true); dv.setUint32(18, dataBytes.length, true); dv.setUint32(22, dataBytes.length, true);
+    dv.setUint16(26, nameBytes.length, true); dv.setUint16(28, 0, true);
+    local.set(nameBytes, 30);
+    chunks.push(local, dataBytes);
+    const cd = new Uint8Array(46 + nameBytes.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true); cv.setUint16(12, 0, true); cv.setUint16(14, 0, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, dataBytes.length, true); cv.setUint32(24, dataBytes.length, true);
+    cv.setUint16(28, nameBytes.length, true); cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true); cv.setUint16(36, 0, true); cv.setUint32(38, 0, true); cv.setUint32(42, offset, true);
+    cd.set(nameBytes, 46);
+    central.push(cd);
+    offset += local.length + dataBytes.length;
+  });
+  const cdSize = central.reduce((s, c) => s + c.length, 0);
+  const end = new Uint8Array(22);
+  const ev = new DataView(end.buffer);
+  ev.setUint32(0, 0x06054b50, true); ev.setUint16(4, 0, true); ev.setUint16(6, 0, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true); ev.setUint16(20, 0, true);
+  return new Blob([...chunks, ...central, end], { type: 'application/zip' });
+}
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 async function sendMessage(override) {
   if (state.busy) { toast('等这条回完再说'); return; }
   if (Date.now() - state.lastRequestAt < 1200) { toast('慢一点，防止额度被一次用完'); return; }
@@ -749,6 +942,14 @@ async function sendMessage(override) {
   }
   appendMsg('user', text);
   const reply = appendMsg('ai', '', { processed: true, actions: false });
+
+  // 开发团队模式：多个 Agent 接力，最后打包成文件
+  if (state.activeAgent?.team) {
+    if (!state.model) { reply.content.textContent = '还没有可用模型，用云端版链接打开即可对话。'; return; }
+    runTeamPipeline(text, reply);
+    return;
+  }
+
   const thinking = document.createElement('span');
   thinking.style.color = 'var(--ink-3)';
   thinking.textContent = '小智正在想…';
@@ -854,6 +1055,10 @@ function restoreActions(reply, text) {
     ['i-thumb-up', '赞', 'up'], ['i-thumb-down', '踩', 'down'],
     ['i-volume', '朗读', 'speak'], ['i-share', '分享', 'share'],
   ].map(([icon, label, key]) => `<button data-msg-act="${key}" title="${label}" aria-label="${label}"><svg class="icon"><use href="#${icon}"/></svg></button>`).join('');
+  // 含代码块时，加一个「下载文件」按钮：直接把代码落成真实文件
+  if (/```[\w-]*\n[\s\S]*?```/.test(text)) {
+    acts.insertAdjacentHTML('beforeend', `<button data-msg-act="savefile" title="下载文件" aria-label="下载文件"><svg class="icon"><use href="#i-folder"/></svg></button>`);
+  }
   body.appendChild(acts);
   reply.acts = acts;
   reply.content.dataset.full = text;
@@ -870,7 +1075,26 @@ byId('messages').addEventListener('click', (e) => {
   if (key === 'up') toast('收到，记下了');
   if (key === 'down') toast('抱歉，下次改进');
   if (key === 'share') copyText(text).then(() => toast('内容已复制，可以粘贴分享'));
+  if (key === 'savefile') saveCodeFile(msg);
 });
+
+// 从回复里的代码块生成真实可下载文件：网页落 .html，其余按语言给扩展名
+function saveCodeFile(msg) {
+  const full = msg.querySelector('.msg-text')?.dataset.full || msg.querySelector('.msg-text')?.innerText || '';
+  const m = String(full).match(/```([\w-]*)\n([\s\S]*?)```/);
+  if (!m) { toast('这条回复里没有可保存的代码'); return; }
+  const lang = (m[1] || '').toLowerCase();
+  const code = m[2].trim();
+  const extMap = { html: 'html', htm: 'html', xml: 'html', js: 'js', javascript: 'js', ts: 'ts', py: 'py', python: 'py', java: 'java', kt: 'kt', kotlin: 'kt', css: 'css', json: 'json', sql: 'sql', sh: 'sh', bash: 'sh', go: 'go', rust: 'rs', php: 'php', swift: 'swift', c: 'c', cpp: 'cpp', csharp: 'cs' };
+  if (lang === 'html' || lang === 'htm' || /<!doctype|<html[\s>]/i.test(code)) {
+    download(ensureFullHtml(code), '小智生成.html', 'text/html;charset=utf-8');
+    toast('网页文件已下载，双击即可打开');
+    return;
+  }
+  const ext = extMap[lang] || 'txt';
+  download(code, `小智生成.${ext}`, 'text/plain;charset=utf-8');
+  toast(`${ext.toUpperCase()} 文件已下载`);
+}
 
 const sendBtn = byId('sendBtn');
 function syncSendBtn() {
