@@ -6,9 +6,9 @@
 <meta name="theme-color" content="#f6f6f8">
 <meta name="description" content="小智工作台 — 会写代码、能聊天的随身助手">
 <title>小智 · 工作台</title>
-<link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261122j">
-<link rel="apple-touch-icon" href="favicon.svg?v=20261122j">
-<link rel="stylesheet" href="styles.css?v=20261122j">
+<link rel="icon" type="image/svg+xml" href="favicon.svg?v=20261122k">
+<link rel="apple-touch-icon" href="favicon.svg?v=20261122k">
+<link rel="stylesheet" href="styles.css?v=20261122k">
 </head>
 <body>
 
@@ -84,9 +84,10 @@
         <span class="nav-label">AI 创作</span>
         <span class="nav-hint">写诗、画图、分镜</span>
       </button>
-      <button class="nav-item" data-goto="tools">
-        <svg class="icon"><use href="#i-code"/></svg>
-        <span class="nav-label">编程工具</span>
+      <button class="nav-item" data-goto="agents">
+        <svg class="icon"><use href="#i-brain"/></svg>
+        <span class="nav-label">智能体</span>
+        <span class="nav-hint">编程、PPT、自己创造</span>
       </button>
       <button class="nav-item" data-goto="skills">
         <svg class="icon"><use href="#i-toolbox"/></svg>
@@ -133,6 +134,7 @@
         </div>
       </header>
 
+      <div class="active-agent-bar" id="activeAgentBar" hidden></div>
       <div class="messages" id="messages">
         <div class="msg ai" data-id="welcome">
           <div class="msg-body">
@@ -204,20 +206,19 @@
       <div class="dock-search"><svg class="icon"><use href="#i-search"/></svg><input id="skillSearch" type="search" placeholder="搜索技能" autocomplete="off"></div>
     </section>
 
-    <!-- 编程工具 -->
-    <section class="view view-panel" id="view-tools">
+    <!-- 智能体 -->
+    <section class="view view-panel" id="view-agents">
       <header class="subtopbar">
         <button class="icon-btn" data-goto="chat" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button>
-        <h1>编程工具</h1>
-        <div class="topbar-actions"><button class="icon-btn" data-action="tool-search" aria-label="搜索"><svg class="icon"><use href="#i-search"/></svg></button></div>
+        <h1>智能体</h1>
+        <div class="topbar-actions">
+          <button class="icon-btn" data-action="create-agent" aria-label="创造智能体"><svg class="icon"><use href="#i-plus"/></svg></button>
+        </div>
       </header>
       <div class="panel-scroll">
-        <div class="tool-hero">
-          <span class="tool-hero-tag">开发者模式</span>
-          <h2>把想法交给小智，<br>代码留给你审核。</h2>
-          <p>生成、解释、重构、排错。你始终是写代码的那个人。</p>
-        </div>
-        <div class="tool-grid" id="toolGrid"></div>
+        <p class="agents-intro">选一个智能体开始对话，或点「生成」让它直接产出结果。你也可以自己创造一个。</p>
+        <div class="agent-list" id="agentList"></div>
+        <button class="agent-create" data-action="create-agent"><svg class="icon"><use href="#i-plus"/></svg> 创造智能体</button>
       </div>
     </section>
 
@@ -267,7 +268,6 @@
           <button class="set-row" data-goto="voice-settings"><svg class="icon"><use href="#i-person"/></svg><span>个性化</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row advanced-only" data-action="theme"><svg class="icon"><use href="#i-palette"/></svg><span>主题色</span><span class="row-value" id="themeValue">默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row" data-goto="voices"><svg class="icon"><use href="#i-book"/></svg><span>朗读设置</span><span class="row-value" id="voiceValue">系统默认</span><svg class="icon chev"><use href="#i-right"/></svg></button>
-          <button class="set-row advanced-only" data-goto="qianfan"><svg class="icon"><use href="#i-spark"/></svg><span>千帆 AI（免费模型）</span><span class="row-value" id="qfStatusMini">未配置</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <button class="set-row advanced-only" data-goto="mcp"><svg class="icon"><use href="#i-brain"/></svg><span>小智 AI 连接</span><span class="row-value" id="mcpStatusMini">未连接</span><svg class="icon chev"><use href="#i-right"/></svg></button>
           <div class="set-row tool-auto-row"><svg class="icon"><use href="#i-toolbox"/></svg><div class="tool-auto-text"><span>自动调用工具</span><small>说到写代码、画图、分镜时自动调用，不用手动点</small></div><button class="switch on" id="autoToolSwitch" data-action="toggle-auto-tool" aria-label="自动调用工具"><span></span></button></div>
         </div>
@@ -315,39 +315,6 @@
               <li>生成后复制 github_pat_ 开头的串，粘到上面保存</li>
             </ol>
           </details>
-        </div>
-      </div>
-    </section>
-
-    <!-- 千帆 AI 设置 -->
-    <section class="view view-panel" id="view-qianfan">
-      <header class="subtopbar">
-        <button class="icon-btn" data-goto="settings" aria-label="返回"><svg class="icon"><use href="#i-back"/></svg></button>
-        <h1>千帆 AI</h1>
-      </header>
-      <div class="panel-scroll">
-        <div class="qf-intro">
-          <div class="qf-badge">百度千帆</div>
-          <p>填入你自己的千帆 API Key，就能用百度官方免费模型（ERNIE Speed / Lite / 3.5 等）。key 只存在这台设备，不进代码、不上传。</p>
-        </div>
-
-        <div class="settings-group" style="padding:16px">
-          <label class="field-label">千帆 API Key</label>
-          <div class="mcp-token-row">
-            <input id="qfKey" type="password" placeholder="粘贴 bce-v3/ALTAK-... 格式的 key" autocomplete="off" spellcheck="false">
-            <button class="mini-btn" id="qfToggle" aria-label="显示/隐藏"><svg class="icon"><use href="#i-search"/></svg></button>
-          </div>
-          <div class="mcp-actions">
-            <button class="mcp-btn ghost" id="qfSave">保存并测试</button>
-            <button class="mcp-btn ghost" id="qfClear">清除</button>
-          </div>
-          <p class="mcp-hint" id="qfTestResult">key 来自百度千帆控制台「应用接入」。免费模型需在控制台点一下「开通」。</p>
-        </div>
-
-        <div class="settings-group" style="padding:16px">
-          <div class="mcp-sec-head"><strong>免费模型</strong><span id="qfModelCount"></span></div>
-          <div id="qfModels" class="mcp-tools"></div>
-          <p class="mcp-hint">保存 key 后，点顶部模型切换就能看到这些模型并选用。标「免费」的是官方免费额度模型。</p>
         </div>
       </div>
     </section>
@@ -547,9 +514,9 @@
     else window.__sdkWaiters.push(fn);
   };
 </script>
-<script src="qianfan.js?v=20261122j"></script>
-<script src="github-sync.js?v=20261122j"></script>
-<script src="app.js?v=20261122j"></script>
-<script src="mcp.js?v=20261122j"></script>
+<script src="qianfan.js?v=20261122k"></script>
+<script src="github-sync.js?v=20261122k"></script>
+<script src="app.js?v=20261122k"></script>
+<script src="mcp.js?v=20261122k"></script>
 </body>
 </html>

@@ -67,6 +67,28 @@ const SKILLS = [
   { name: '批量重命名', desc: '写脚本按规则整理文件', emoji: '🗂️', bg: '#eef2ff', prompt: '写个脚本按我的规则批量重命名文件，要求支持预览（dry-run）、有冲突提示、关键处中文注释。先说规则。' },
 ];
 
+// 预置智能体：点一下就带着人设跟你聊，也可以直接「自动生成」
+const BUILTIN_AGENTS = [
+  { id: 'coder', name: '编程助手', emoji: '💻', bg: '#eef2ff', desc: '写代码、改 bug、重构，给能直接跑的结果',
+    system: '你是一名资深全栈工程师。用户要代码就直接给完整可运行的代码，放代码块里，关键处写中文注释；先给结论再说明理由，指出容易踩的坑。不确定就直说，绝不编造 API。代码注释用中文。',
+    auto: '帮我写一个实用的小工具代码，要求能直接运行、关键处有中文注释。' },
+  { id: 'ppt', name: 'PPT 制作', emoji: '📑', bg: '#fff1e0', desc: '把主题变成逐页大纲，含备注',
+    system: '你是演示文稿专家。用户给主题后，按 Marp 格式输出逐页大纲：封面、目录、每页标题+要点+演讲备注（<!-- 备注 -->），用 --- 分隔。要点精炼、逻辑清楚。先问主题和页数。',
+    auto: '帮我做一份 PPT 逐页大纲。主题我稍后告诉你。' },
+  { id: 'writer', name: '文案写作', emoji: '✍️', bg: '#f3ebff', desc: '写文章、邮件、周报，表达清楚有分寸',
+    system: '你是一名专业文案。写东西重点前置、表达清楚、不啰嗦；根据用户要的场景调整语气。写完附一句说明你的取舍。用中文。',
+    auto: '帮我写一段文案。用途和主题我稍后告诉你。' },
+  { id: 'artist', name: '画图助手', emoji: '🎨', bg: '#e9f4ff', desc: '用描述生成矢量插画',
+    system: '你是矢量插画师。用户描述画面后，直接输出一个完整的 <svg> 代码块（不要 Markdown 图片语法、不要多余解释），配色克制、结构清晰。代码块后用一句话说明画了什么。',
+    auto: '画一张温暖的插画：主题我稍后告诉你。' },
+  { id: 'analyst', name: '数据分析', emoji: '📊', bg: '#e8f7f6', desc: '从数据里找趋势、异常和结论',
+    system: '你是数据分析师。用户给数据后，先给结论再给依据，指出趋势、异常和值得追问的点；需要时用表格呈现。不编造数据，缺失就说明。用中文。',
+    auto: '帮我分析一组数据，找出趋势和异常。数据我稍后发你。' },
+  { id: 'tutor', name: '学习助教', emoji: '📚', bg: '#fff6dc', desc: '把难题讲到你听懂为止',
+    system: '你是耐心的老师。讲解先讲直觉和大框架，再讲细节；多用类比和例子，用户不懂就换种说法重讲，不嘲笑、不敷衍。用中文。',
+    auto: '给我讲清楚一个我不太懂的知识点，是什么我稍后说。' },
+];
+
 const TOOLS = [
   { id: 'gen', name: '代码生成', desc: '按需求写出能跑的实现', icon: 'i-code', bg: '#e8f1ff', color: '#2f6fd0', template: '用 {{语言}} 写一段代码：{{需求}}。要求可直接运行，关键处写中文注释，并说明取舍。' },
   { id: 'review', name: '代码审查', desc: '挑出 bug 和隐患', icon: 'i-search', bg: '#fff0ec', color: '#d9603f', template: '审查下面这段代码，按严重程度列出问题、原因和改法：\n\n{{粘贴代码}}' },
@@ -190,6 +212,7 @@ const defaults = {
   // 福利中心 + 小智派
   points: 0, checkinDays: [], quizDone: [], friends: [], myCode: '',
   simpleMode: true, persona: 'taiwan', botName: '小智', botAvatar: '智',
+  agents: [], // 用户自己创建的智能体（预置智能体在代码里）
 };
 let store = { ...defaults };
 try { Object.assign(store, JSON.parse(localStorage.getItem(STORE_KEY) || '{}')); } catch (e) { /* 用默认值 */ }
@@ -231,7 +254,6 @@ async function autoPullOnBoot() {
     renderHistory(); renderTasks(); renderMemory(); renderBenefits(); renderCircle();
     renderWorks(); applyProfile(); applySimpleMode();
     byId('themeValue').textContent = store.theme;
-    refreshQfUI();
     const mini = byId('syncStatusMini'); if (mini) mini.textContent = '已恢复';
   } catch (e) { /* 没网或没文件，用本地数据 */
     const mini = byId('syncStatusMini'); if (mini) mini.textContent = '未配置';
@@ -250,20 +272,21 @@ const state = {
   skillQuery: '',
   taskTab: 'doing',
   createType: 'image',
+  activeAgent: null, // 当前激活的智能体（人设注入 system）
   recognition: null,
   syncing: false,
   cloudReady: false,
   qianfanReady: !!window.QIANFAN?.getKey?.(),
 };
 
-/* ---------- 统一模型通道：云端 SDK 或千帆 ---------- */
+/* ---------- 统一模型通道：云端 SDK 或本地已配置模型 ---------- */
 function currentSource() { return state.model?.source === 'qianfan' ? 'qianfan' : 'cloud'; }
 
 // 统一流式接口：产出纯文本增量，屏蔽底层差异
 async function* streamChat(messages, signal) {
   const src = currentSource();
   if (src === 'qianfan') {
-    if (!window.QIANFAN) throw new Error('千帆脚本还没加载，刷新页面重试');
+    if (!window.QIANFAN) throw new Error('模型脚本还没加载，刷新页面重试');
     for await (const text of window.QIANFAN.chatStream(messages, state.model.id, signal)) {
       yield text;
     }
@@ -321,8 +344,7 @@ function initCloud() {
 }
 
 function qianfanModels() {
-  // 关键修复：不因为「没填 key」就把模型藏掉。
-  // 模型永远可见、可选，缺 key 只是标个「需填 key」，点下去会引导你填。
+  // 本地已配置的模型永远列出，不藏；界面不再出现任何配置入口或字样。
   if (!window.QIANFAN?.models) return [];
   const hasKey = !!window.QIANFAN?.getKey?.();
   return window.QIANFAN.models().map((m) => ({
@@ -340,7 +362,7 @@ function assembleModels(cloudModels = []) {
     id: m.id, name: m.name || m.id, description: m.description || '云端模型', source: 'cloud',
   }));
   const qf = qianfanModels();
-  // 去重：同 id 以千帆为准（明确标 source）
+  // 去重：同 id 以本地配置为准
   const seen = new Set(normalized.map((m) => m.id));
   const merged = [...normalized, ...qf.filter((m) => !seen.has(m.id))];
   state.models = merged;
@@ -357,42 +379,23 @@ async function loadModels() {
     try {
       cloudModels = await cloud.llm.models.list();
     } catch (err) {
-      // 云端拉取失败不致命，千帆模型照样可用
+      // 云端拉取失败不致命，本地已配置模型照样可用
     }
   }
-  // 千帆 key 一填就能进列表，即使云端完全没连上
+  // 本地已配置的模型照常进列表，即使云端完全没连上
   if (assembleModels(cloudModels)) {
     const qfCount = state.models.filter((m) => m.source === 'qianfan').length;
-    const hasKey = !!window.QIANFAN?.getKey?.();
     const parts = [];
     if (state.cloudReady && cloudModels.length) parts.push(`${cloudModels.length} 个云端模型`);
-    if (qfCount) parts.push(`${qfCount} 个千帆模型`);
+    if (qfCount) parts.push(`${qfCount} 个可选模型`);
     byId('modelCurrent').textContent = parts.length
-      ? `可选：${parts.join(' + ')}${hasKey || state.cloudReady ? '' : ' · 选一个后会引导填 key'}`
-      : '当前没有可用模型，点下方按钮填千帆 key。';
+      ? `可选：${parts.join(' + ')}`
+      : '当前没有可用模型，用云端版链接打开即可对话。';
     renderModelOptions();
     updateSideContext();
-    renderModelFooter(hasKey);
   } else {
-    byId('modelCurrent').textContent = '没有可用模型：点下方按钮填千帆 key，就能开始对话。';
-    renderModelFooter(false);
+    byId('modelCurrent').textContent = '没有可用模型：用云端版链接打开即可对话。';
   }
-}
-
-// 模型弹层底部永远留一个「填 key / 换 key」入口，不因为隐藏高级设置就找不到
-function renderModelFooter(hasKey) {
-  const sheet = byId('modelSheet');
-  if (!sheet) return;
-  let foot = byId('modelKeyEntry');
-  if (!foot) {
-    foot = document.createElement('button');
-    foot.id = 'modelKeyEntry';
-    foot.className = 'model-key-entry';
-    foot.type = 'button';
-    sheet.querySelector('.sheet-body')?.appendChild(foot);
-  }
-  foot.innerHTML = `<svg class="icon"><use href="#i-spark"/></svg> ${hasKey ? '千帆 key 已填，点这里更换或测试' : '第一次用？点这里填千帆 key（免费）'}`;
-  foot.onclick = () => { closeSheets(); goto('qianfan'); };
 }
 
 function renderModelOptions() {
@@ -403,11 +406,7 @@ function renderModelOptions() {
     btn.className = 'model-option' + (state.model?.id === m.id ? ' selected' : '');
     const name = m.name || m.id;
     const desc = m.description || ['快答：日常问题，响应更快', '深度：复杂推理，想得更透', '专家：适合多步任务'][Math.min(i, 2)];
-    const tag = m.source === 'qianfan'
-      ? (m.needsKey
-        ? '<span class="mo-tag need">需填 key</span>'
-        : `<span class="mo-tag ${m.free ? 'free' : ''}">${m.free ? '免费' : '千帆'}</span>`)
-      : '';
+    const tag = m.free ? '<span class="mo-tag free">免费</span>' : '';
     btn.innerHTML = `<span class="mo-main"><strong>${esc(name)} ${tag}</strong><small>${esc(desc)}</small></span><svg class="icon check"><use href="#i-check"/></svg>`;
     btn.onclick = () => {
       state.model = m;
@@ -415,12 +414,6 @@ function renderModelOptions() {
       persist();
       renderModelOptions();
       updateSideContext();
-      if (m.needsKey) {
-        closeSheets();
-        goto('qianfan');
-        toast('选好模型了，填上 key 就能用');
-        return;
-      }
       closeSheets();
       toast(`已切到 ${name}`);
     };
@@ -546,13 +539,14 @@ document.addEventListener('click', (e) => {
     'add-group': () => toast('分组功能先留空，需要再加'),
     'sort-history': () => toast('已按最近使用排序'),
     'sort-skills': () => toast('技能按使用频率排列'),
-    'tool-search': () => byId('toolGrid').scrollIntoView(),
+    'tool-search': () => byId('toolGrid')?.scrollIntoView(),
     'copy-code': (el) => copyText(el.closest('.msg-code').querySelector('pre').innerText),
     search: openGlobalSearch,
     checkin: doCheckin,
     'answer-quiz': (el) => answerQuiz(el.dataset.qid),
     'copy-my-code': copyMyCode,
     'clear-works': clearWorks,
+    'create-agent': createAgent,
     'add-friend': addFriend,
     'call-friend': (el) => callFriend(el.dataset.friend),
     'remove-friend': (el) => removeFriend(el.dataset.friend),
@@ -761,7 +755,7 @@ async function sendMessage(override) {
   reply.content.appendChild(thinking);
 
   if (!state.model) {
-    thinking.textContent = '没有可用模型。去「设置 → 千帆 AI」填入 key，或刷新页面重试。';
+    thinking.textContent = '还没有可用模型，用云端版链接打开即可对话。';
     return;
   }
 
@@ -781,7 +775,11 @@ async function sendMessage(override) {
   let full = '';
   stopSpeech(); // 新一轮对话，清掉上一次的朗读队列
   const ctx = state.currentChat.context.slice(-12);
-  const baseSystem = tool ? tool.system : SYSTEM_PROMPT;
+  let baseSystem = tool ? tool.system : SYSTEM_PROMPT;
+  // 智能体激活时，用它的人设覆盖（工具任务也带上智能体身份）
+  if (state.activeAgent?.system) {
+    baseSystem = baseSystem + '\n\n【你现在扮演的智能体】\n' + state.activeAgent.system;
+  }
   const withMemory = store.memoryOn && store.memories.length
     ? `${baseSystem}\n\n你记住的关于用户的偏好：${store.memories.map((m) => m.text).join('；')}`
     : baseSystem;
@@ -829,9 +827,7 @@ async function sendMessage(override) {
       if (full) restoreActions(reply, full);
     } else {
       const msg = friendlyError(err);
-      const needKey = currentSource() === 'qianfan' && !window.QIANFAN?.getKey?.();
-      reply.content.innerHTML = renderText(full) + (full ? '<br><br>' : '') + `<span style="color:#c04747">${esc(msg)}</span>`
-        + (needKey ? '<br><button class="inline-fix-btn" data-goto="qianfan">去填千帆 key（免费，填一次一直用）</button>' : '');
+      reply.content.innerHTML = renderText(full) + (full ? '<br><br>' : '') + `<span style="color:#c04747">${esc(msg)}</span>`;
       const retry = document.createElement('button');
       retry.className = 'tag';
       retry.style.marginTop = '10px';
@@ -1212,7 +1208,7 @@ function setVoiceTranscript(who, text) {
 // 语音通话：把识别出的话发给 AI，回复打到通话页并出声朗读
 async function callAIFromVoice(text) {
   if (!state.model) {
-    setVoiceStatus('没有可用模型。去「设置 → 千帆 AI」填 key，或刷新页面。');
+    setVoiceStatus('还没有可用模型，用云端版链接打开即可对话。');
     toast('先去设置里配置一个模型');
     return;
   }
@@ -1309,6 +1305,7 @@ byId('skillSearch').addEventListener('input', (e) => { state.skillQuery = e.targ
 
 function renderTools() {
   const box = byId('toolGrid');
+  if (!box) return;
   box.innerHTML = '';
   TOOLS.forEach((t) => {
     const card = document.createElement('button');
@@ -1614,7 +1611,7 @@ function recordAsset(type, text) {
 
 /* ---------- 供 MCP 工具调用的通用接口 ---------- */
 async function xzAsk(prompt, system = SYSTEM_PROMPT) {
-  if (!state.model) throw new Error('没有可用模型，去设置里填千帆 key 或连接云端');
+  if (!state.model) throw new Error('还没有可用模型，用云端版链接打开即可对话');
   let out = '';
   for await (const piece of streamChat([
     { role: 'system', content: system }, { role: 'user', content: prompt },
@@ -1633,59 +1630,6 @@ window.XZ = {
   isCloudReady: () => !!state.model && (state.cloudReady || currentSource() === 'qianfan'),
   systemPrompt: SYSTEM_PROMPT,
 };
-
-/* ---------- 千帆 AI 设置页 ---------- */
-function refreshQfUI() {
-  const has = !!(window.QIANFAN?.getKey?.());
-  const mini = byId('qfStatusMini');
-  if (mini) mini.textContent = has ? '已配置' : '未配置';
-  const box = byId('qfModels');
-  if (box) {
-    const models = window.QIANFAN?.models?.() || [];
-    byId('qfModelCount').textContent = `${models.filter((m) => m.free).length} 个免费`;
-    box.innerHTML = models.map((m) =>
-      `<div class="mcp-tool"><strong>${esc(m.name)} ${m.free ? '<span class="mo-tag free">免费</span>' : ''}</strong><span>${esc(m.note)}</span></div>`
-    ).join('');
-  }
-}
-
-function initQianfanUI() {
-  const input = byId('qfKey');
-  const result = byId('qfTestResult');
-  if (input) {
-    const saved = window.QIANFAN?.getKey?.() || '';
-    input.value = saved;
-    byId('qfToggle')?.addEventListener('click', () => { input.type = input.type === 'password' ? 'text' : 'password'; });
-    byId('qfSave')?.addEventListener('click', async () => {
-      const v = (input.value || '').trim();
-      if (!v) { toast('先填入千帆 key'); return; }
-      window.QIANFAN.setKey(v);
-      refreshQfUI();
-      state.qianfanReady = true;
-      result.textContent = '正在测试 key…';
-      // 用免费模型实测一次，给用户明确结果
-      try {
-        await window.QIANFAN.ask('只回复两个字：可用', '', 'ernie-speed-8k');
-        result.textContent = '✓ key 可用，免费模型能调通。去顶部模型切换选一个开始。';
-        loadModels();
-        toast('千帆 key 已保存并验证');
-      } catch (err) {
-        result.textContent = '⚠ ' + (window.QIANFAN.friendly?.(err) || err.message);
-        loadModels();
-        toast('key 已保存，但测试没通过，看下方提示');
-      }
-    });
-    byId('qfClear')?.addEventListener('click', () => {
-      window.QIANFAN.clearKey();
-      input.value = '';
-      state.qianfanReady = false;
-      refreshQfUI();
-      result.textContent = '已清除本机 key。';
-      loadModels();
-    });
-  }
-  refreshQfUI();
-}
 
 /* ---------- GitHub 数据同步 ---------- */
 function refreshSyncUI() {
@@ -1750,7 +1694,6 @@ function initSyncUI() {
       // 重画所有受影响的界面
       renderHistory(); renderTasks(); renderMemory();
       byId('themeValue').textContent = store.theme;
-      refreshQfUI();
       say('✓ 已拉取并覆盖本机数据（' + (data.updatedAt ? new Date(data.updatedAt).toLocaleString('zh-CN') : '未知时间') + '）');
       toast('数据已从 GitHub 同步');
     } catch (err) {
@@ -1906,6 +1849,101 @@ function clearWorks() {
   persist(); renderWorks(); toast('作品已清空');
 }
 
+/* ---------- 智能体中心 ---------- */
+function allAgents() { return [...BUILTIN_AGENTS, ...(store.agents || [])]; }
+function renderAgents() {
+  const box = byId('agentList');
+  if (!box) return;
+  box.innerHTML = '';
+  allAgents().forEach((a) => {
+    const card = document.createElement('div');
+    card.className = 'agent-card' + (state.activeAgent?.id === a.id ? ' active' : '');
+    card.innerHTML = `
+      <div class="agent-face" style="background:${esc(a.bg || '#eef2ff')}">${esc(a.emoji || '🤖')}</div>
+      <div class="agent-info"><strong>${esc(a.name)}</strong><span>${esc(a.desc || '点一下开始对话')}</span></div>
+      <div class="agent-actions">
+        <button class="agent-chat" title="和它对话">对话</button>
+        <button class="agent-auto" title="自动生成">生成</button>
+        ${a.custom ? `<button class="agent-del" title="删除" data-del="${esc(a.id)}">×</button>` : ''}
+      </div>`;
+    card.querySelector('.agent-chat').onclick = () => useAgent(a, false);
+    card.querySelector('.agent-auto').onclick = () => useAgent(a, true);
+    card.querySelector('.agent-del')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      store.agents = (store.agents || []).filter((x) => x.id !== a.id);
+      if (state.activeAgent?.id === a.id) state.activeAgent = null;
+      persist(); renderAgents();
+      if (state.activeAgent === null) byId('activeAgentBar')?.setAttribute('hidden', '');
+      toast('智能体已删除');
+    });
+    box.appendChild(card);
+  });
+  renderActiveAgentBar();
+}
+function useAgent(a, auto) {
+  state.activeAgent = a;
+  renderActiveAgentBar();
+  renderAgents();
+  goto('chat');
+  if (auto && a.auto) {
+    setInput(a.auto);
+    setTimeout(() => sendMessage(), 60);
+    toast(`「${a.name}」开始生成`);
+  } else {
+    byId('input').focus();
+    toast(`已切换到「${a.name}」`);
+  }
+}
+function renderActiveAgentBar() {
+  const bar = byId('activeAgentBar');
+  if (!bar) return;
+  if (!state.activeAgent) { bar.setAttribute('hidden', ''); return; }
+  bar.hidden = false;
+  bar.innerHTML = `<span class="aab-face">${esc(state.activeAgent.emoji || '🤖')}</span>
+    <span class="aab-text">正在用「<b>${esc(state.activeAgent.name)}</b>」</span>
+    <button id="aabClear" title="退出智能体">退出</button>`;
+  byId('aabClear').onclick = () => {
+    state.activeAgent = null;
+    renderActiveAgentBar();
+    renderAgents();
+    toast('已退出智能体，回到小智');
+  };
+}
+function createAgent() {
+  const content = byId('promptContent');
+  if (!content) return;
+  content.innerHTML = `
+    <label class="field-label">名字</label>
+    <input id="agName" maxlength="16" placeholder="比如：面试考官">
+    <label class="field-label" style="margin-top:12px">它是做什么的（一句话）</label>
+    <input id="agDesc" maxlength="40" placeholder="比如：帮我模拟面试并给建议">
+    <label class="field-label" style="margin-top:12px">人设 / 说话方式</label>
+    <textarea id="agSystem" rows="4" placeholder="比如：你是一名严格但友善的面试官，按岗位提问，每次问一个，回答后给点评和改进建议。"></textarea>
+    <label class="field-label" style="margin-top:12px">一键生成的开场（可选）</label>
+    <input id="agAuto" maxlength="60" placeholder="比如：开始模拟一场面试">
+    <div class="prompt-actions"><button data-act="cancel">取消</button><button class="primary" data-act="save">创建</button></div>`;
+  byId('promptTitle').textContent = '创造智能体';
+  openSheet('promptSheet');
+  content.querySelector('[data-act="cancel"]').onclick = closeSheets;
+  content.querySelector('[data-act="save"]').onclick = () => {
+    const name = (byId('agName').value || '').trim();
+    const desc = (byId('agDesc').value || '').trim();
+    const system = (byId('agSystem').value || '').trim();
+    const auto = (byId('agAuto').value || '').trim();
+    if (!name) { toast('给智能体起个名字'); return; }
+    if (!system) { toast('写一下它的人设或说话方式'); return; }
+    const faces = ['🤖','🦊','🐱','🌸','🧩','🎯','📌','⚡'];
+    store.agents = store.agents || [];
+    store.agents.push({
+      id: 'ag_' + Date.now(), name, desc: desc || '我创建的智能体',
+      emoji: faces[store.agents.length % faces.length], bg: '#eaf2ff', system,
+      auto: auto || `用「${name}」的身份开始：${desc || '介绍你自己并问我需要什么帮助'}`, custom: true,
+    });
+    persist(); renderAgents(); closeSheets();
+    toast(`「${name}」已创建`);
+  };
+}
+
 /* ---------- 全局搜索 ---------- */
 function openGlobalSearch() {
   openSheet('searchSheet');
@@ -1916,12 +1954,12 @@ byId('globalSearch')?.addEventListener('input', (e) => {
   const q = e.target.value.trim().toLowerCase();
   const box = byId('searchResults');
   if (!box) return;
-  if (!q) { box.innerHTML = '<p class="search-hint">输入关键词，搜技能、工具、历史对话。</p>'; return; }
+  if (!q) { box.innerHTML = '<p class="search-hint">输入关键词，搜智能体、技能、历史对话。</p>'; return; }
   const hits = [];
+  allAgents().filter((a) => (a.name + (a.desc || '')).toLowerCase().includes(q))
+    .forEach((a) => hits.push({ kind: '智能体', title: a.name, desc: a.desc || '', go: () => { closeSheets(); useAgent(a, false); } }));
   SKILLS.filter((s) => (s.name + s.desc).toLowerCase().includes(q))
     .forEach((s) => hits.push({ kind: '技能', title: s.name, desc: s.desc, go: () => { closeSheets(); goto('chat'); setInput(s.prompt); } }));
-  TOOLS.filter((t) => (t.name + t.desc).toLowerCase().includes(q))
-    .forEach((t) => hits.push({ kind: '工具', title: t.name, desc: t.desc, go: () => { closeSheets(); goto('tools'); } }));
   store.history.filter((h) => (h.title || '').toLowerCase().includes(q))
     .forEach((h) => hits.push({ kind: '对话', title: h.title || '新对话', desc: h.at || '', go: () => { closeSheets(); const el = byId('historyList')?.querySelector(`[data-hist-id="${h.id}"] .history-title`); if (el) el.click(); } }));
   if (!hits.length) { box.innerHTML = '<p class="search-hint">没找到相关的，换个词试试。</p>'; return; }
@@ -2064,10 +2102,10 @@ function boot() {
   renderBenefits();
   renderCircle();
   renderWorks();
+  renderAgents();
   applyProfile();
   applySimpleMode();
   renderCreateTabs();
-  initQianfanUI();
   initSyncUI();
   autoPullOnBoot();
   // 手机和 Chrome 首次 getVoices 常为空，等系统把声音列表加载好再重画
@@ -2081,7 +2119,7 @@ function boot() {
     if (typeof window.whenSdk === 'function') {
       window.whenSdk(() => {
         initCloud();
-        // 云端 SDK 即便没就绪，千帆模型也要进列表（没 key 也列出并引导填）
+        // 云端 SDK 即便没就绪，本地已配置模型也要进列表
         if (!state.cloudReady) loadModels();
       });
     } else {
@@ -2089,7 +2127,7 @@ function boot() {
     }
   } else {
     showEnvBanner();
-    // 静态版：千帆模型永远列出（没 key 也列出并引导填），真 AI 照样能用
+    // 静态版：本地已配置模型永远列出，真 AI 照样能用
     loadModels();
   }
 }
